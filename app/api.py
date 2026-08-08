@@ -7,12 +7,18 @@ ignored by an evaluator.
 
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
 import logging
+import time
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 
 from . import config, director
 from . import session as store
@@ -124,3 +130,39 @@ def index():
     if not page.exists():
         return JSONResponse({"error": "UI not built", "api": "POST /api/interview"})
     return FileResponse(page)
+
+
+# ---------------------------------------------------------------------------
+# LiveKit token — no extra deps, pure JWT HS256
+# ---------------------------------------------------------------------------
+
+
+class LiveKitTokenRequest(BaseModel):
+    apiKey: str
+    apiSecret: str
+    url: str
+    room: str = "interview-room"
+    identity: str = "candidate"
+
+
+@app.post("/api/livekit-token")
+def livekit_token(req: LiveKitTokenRequest) -> JSONResponse:
+    if not req.apiKey or not req.apiSecret:
+        return JSONResponse({"error": "missing credentials"}, status_code=400)
+
+    def b64url(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    now = int(time.time())
+    header = b64url(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    payload = b64url(json.dumps({
+        "iss": req.apiKey,
+        "sub": req.identity,
+        "iat": now,
+        "exp": now + 7200,
+        "nbf": now,
+        "video": {"room": req.room, "roomJoin": True, "canPublish": True, "canSubscribe": True},
+    }, separators=(",", ":")).encode())
+    msg = f"{header}.{payload}".encode()
+    sig = b64url(hmac.new(req.apiSecret.encode(), msg, hashlib.sha256).digest())
+    return JSONResponse({"token": f"{header}.{payload}.{sig}", "url": req.url, "room": req.room})

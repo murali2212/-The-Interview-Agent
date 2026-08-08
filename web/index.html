@@ -1,277 +1,392 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>ABTalks Interview Agent</title>
 <style>
-  :root{
-    --bg:#0a0b0d; --panel:#101217; --panel2:#14171d; --line:#23272f; --soft:#1a1d23;
-    --text:#e6e8ec; --dim:#8b929e; --dimmer:#5d636e;
-    --accent:#6ea8fe; --good:#4ec9a0; --warn:#e0b654; --bad:#e0705f;
-    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
-  }
-  *{box-sizing:border-box}
-  html,body{height:100%}
-  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
-  button{font:inherit;color:inherit;background:none;border:1px solid var(--line);border-radius:4px;padding:7px 13px;cursor:pointer;transition:border-color .12s,background .12s}
-  button:hover:not(:disabled){border-color:var(--dim);background:var(--panel2)}
-  button:disabled{opacity:.4;cursor:not-allowed}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#06080c;font-weight:600}
-  button.primary:hover:not(:disabled){background:#8bbcff;border-color:#8bbcff}
-  button.ghost{border-color:transparent;color:var(--dim);padding:5px 9px}
-  button.ghost:hover{color:var(--text)}
-  .mono{font-family:var(--mono)} .dim{color:var(--dim)} .dimmer{color:var(--dimmer)}
-  ::-webkit-scrollbar{width:9px;height:9px}
-  ::-webkit-scrollbar-thumb{background:#20242c;border-radius:5px}
-  ::-webkit-scrollbar-thumb:hover{background:#2c313b}
-  ::-webkit-scrollbar-track{background:transparent}
+:root{
+  --bg:#0a0b0d;--panel:#101217;--panel2:#14171d;--line:#23272f;--soft:#1a1d23;
+  --text:#e6e8ec;--dim:#8b929e;--dimmer:#5d636e;
+  --accent:#6ea8fe;--good:#4ec9a0;--warn:#e0b654;--bad:#e0705f;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font:14px/1.55 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+button{font:inherit;color:inherit;background:none;border:1px solid var(--line);border-radius:6px;padding:8px 16px;cursor:pointer;transition:all .15s}
+button:hover:not(:disabled){border-color:var(--dim);background:var(--panel2)}
+button:disabled{opacity:.4;cursor:not-allowed}
+button.primary{background:var(--accent);border-color:var(--accent);color:#06080c;font-weight:600}
+button.primary:hover:not(:disabled){background:#8bbcff;border-color:#8bbcff}
+button.ghost{border-color:transparent;color:var(--dim)}
+button.ghost:hover{color:var(--text);background:var(--panel2)}
+input,textarea{font:inherit;background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:10px 13px;outline:none;transition:border-color .15s;width:100%}
+input:focus,textarea:focus{border-color:var(--accent)}
+::-webkit-scrollbar{width:8px}
+::-webkit-scrollbar-thumb{background:#20242c;border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+.mono{font-family:var(--mono)}
+.dim{color:var(--dim)}
+.dimmer{color:var(--dimmer)}
 
-  /* ---------- header ---------- */
-  header{display:flex;align-items:center;gap:14px;padding:11px 20px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap;position:relative}
-  .brand{font-weight:600;letter-spacing:.16em;text-transform:uppercase;font-size:11.5px;white-space:nowrap}
-  .pill{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;padding:2px 7px;border:1px solid var(--line);border-radius:3px;color:var(--dim);white-space:nowrap}
-  .pill.live{color:var(--good);border-color:#26493c}
-  .pill.off{color:var(--warn);border-color:#4a3f22}
-  .spacer{flex:1}
-  .progress{position:absolute;left:0;bottom:-1px;height:2px;background:var(--accent);transition:width .45s cubic-bezier(.4,0,.2,1)}
-  .steps{display:flex;gap:3px;align-items:center}
-  .step{width:15px;height:3px;border-radius:2px;background:var(--line);transition:background .3s}
-  .step.on{background:var(--accent)}
-  .step.now{background:var(--accent);box-shadow:0 0 0 2px rgba(110,168,254,.22)}
+/* ───── PAGE TRANSITIONS ───── */
+.page{position:fixed;inset:0;display:flex;flex-direction:column;transition:opacity .3s,transform .3s;will-change:opacity,transform}
+.page.hidden{opacity:0;pointer-events:none;transform:translateY(16px)}
 
-  /* ---------- layout ---------- */
-  .grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:1px;background:var(--soft);height:calc(100vh - 47px)}
-  /* No scroll-behavior:smooth here. Restoring scrollTop after a re-render must
-     be instant: an animated restore emits its own scroll events, which the
-     stick-to-bottom detector reads as the user scrolling away. Smooth motion is
-     opted into per call (scrollIntoView) where it is actually wanted. */
-  .col{background:var(--bg);overflow-y:auto;overscroll-behavior:contain}
-  #chat{display:flex;flex-direction:column;padding:20px 24px 0}
-  #side{padding:18px 18px 40px}
-  .col h2{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--dimmer);margin:0 0 12px;font-weight:600}
-  @media(max-width:900px){
-    .grid{grid-template-columns:1fr;height:auto}
-    .col{max-height:none;overflow:visible}
-    #side{border-top:1px solid var(--line)}
-  }
+/* ───── WELCOME ───── */
+#pg-welcome{background:var(--bg);align-items:center;justify-content:center;text-align:center;gap:0}
+.welcome-glow{position:absolute;width:600px;height:600px;border-radius:50%;background:radial-gradient(circle,rgba(110,168,254,.08) 0%,transparent 70%);top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none}
+.welcome-logo{font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:var(--accent);font-weight:600;margin-bottom:28px}
+.welcome-title{font-size:clamp(36px,6vw,64px);font-weight:700;letter-spacing:-.03em;line-height:1.1;margin-bottom:18px}
+.welcome-title span{background:linear-gradient(135deg,var(--accent),#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.welcome-sub{color:var(--dim);font-size:16px;max-width:480px;margin:0 auto 40px;line-height:1.65}
+.welcome-cta{font-size:16px;padding:14px 36px;border-radius:8px;letter-spacing:.02em}
 
-  /* ---------- picker ---------- */
-  .picker{max-width:860px;margin:0 auto;padding:44px 22px 60px}
-  .picker h1{font-size:26px;margin:0 0 10px;letter-spacing:-.01em}
-  .lede{color:var(--dim);max-width:620px;margin-bottom:22px}
-  .filter{width:100%;max-width:340px;background:var(--panel);border:1px solid var(--line);border-radius:4px;color:var(--text);padding:8px 11px;font:13px var(--sans);margin-bottom:16px}
-  .filter:focus{outline:none;border-color:var(--accent)}
-  .cand{display:flex;justify-content:space-between;align-items:center;gap:16px;border:1px solid var(--line);border-radius:5px;padding:13px 15px;margin-bottom:7px;background:var(--panel);transition:border-color .12s,transform .12s}
-  .cand:hover{border-color:var(--dim);transform:translateX(2px)}
-  .cand .who{font-weight:600}
-  .cand .role{color:var(--dimmer);font-weight:400}
-  .stats{display:flex;gap:14px;margin-top:6px;font-family:var(--mono);font-size:10.5px;color:var(--dimmer);align-items:center;flex-wrap:wrap}
-  .ratio{display:flex;align-items:center;gap:6px}
-  .rbar{width:46px;height:3px;background:var(--line);border-radius:2px;overflow:hidden}
-  .rfill{height:3px}
-  .tag{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;padding:1px 5px;border-radius:2px;border:1px solid}
+/* ───── MODE SELECTION ───── */
+#pg-mode{align-items:center;justify-content:center;gap:0;background:var(--bg)}
+.mode-title{font-size:24px;font-weight:600;margin-bottom:8px;letter-spacing:-.01em}
+.mode-sub{color:var(--dim);margin-bottom:36px}
+.mode-cards{display:flex;gap:16px;flex-wrap:wrap;justify-content:center}
+.mode-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:32px 36px;width:240px;text-align:center;cursor:pointer;transition:all .2s;position:relative;overflow:hidden}
+.mode-card:hover{border-color:var(--accent);transform:translateY(-3px);box-shadow:0 12px 40px rgba(110,168,254,.12)}
+.mode-card .icon{font-size:36px;margin-bottom:16px;display:block}
+.mode-card .label{font-size:17px;font-weight:600;margin-bottom:8px}
+.mode-card .desc{font-size:13px;color:var(--dim);line-height:1.5}
+.mode-back{margin-top:28px;color:var(--dim);background:none;border:none;cursor:pointer;font-size:13px}
+.mode-back:hover{color:var(--text)}
 
-  /* ---------- chat ---------- */
-  .msg{margin-bottom:16px;max-width:80%;animation:rise .28s ease-out}
-  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-  .msg.them{margin-right:auto}
-  .msg.me{margin-left:auto}
-  .bubble{padding:11px 14px;border-radius:5px;white-space:pre-wrap;word-wrap:break-word}
-  .them .bubble{background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--accent)}
-  .me .bubble{background:#16202e;border:1px solid #24344a}
-  .qmeta{display:flex;gap:8px;flex-wrap:wrap;font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--dimmer);margin-bottom:5px;align-items:center}
-  .kind{color:var(--accent)}
-  .follows{color:var(--accent);cursor:pointer;text-decoration:underline dotted}
-  .why{font-style:italic;color:var(--dimmer);font-size:12px;margin-top:6px;line-height:1.45}
-  .scorecard{max-width:80%;margin:-8px 0 16px;padding:8px 12px;border:1px dashed var(--line);border-radius:5px;background:#0d0f13}
-  .meters{display:flex;gap:16px;flex-wrap:wrap}
-  .meter{font-family:var(--mono);font-size:9.5px;color:var(--dimmer)}
-  .track{width:60px;height:3px;background:var(--line);margin-top:3px;border-radius:2px;overflow:hidden}
-  .fill{height:3px;transition:width .5s ease-out}
-  .flash{animation:flash 1.1s ease-out}
-  @keyframes flash{0%{border-color:var(--accent)}100%{border-color:var(--line)}}
+/* ───── MODAL ───── */
+.backdrop{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(4px);opacity:0;transition:opacity .2s;pointer-events:none}
+.backdrop.open{opacity:1;pointer-events:all}
+.modal{background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:28px 28px 24px;width:100%;max-width:420px;transform:scale(.96);transition:transform .2s}
+.backdrop.open .modal{transform:scale(1)}
+.modal h2{font-size:17px;font-weight:600;margin-bottom:6px}
+.modal .sub{color:var(--dim);font-size:13px;margin-bottom:22px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:500;letter-spacing:.03em;text-transform:uppercase}
+.field-link{font-size:11.5px;color:var(--accent);text-decoration:none;margin-top:5px;display:inline-block}
+.field-link:hover{text-decoration:underline}
+.modal-sep{border:none;border-top:1px solid var(--line);margin:18px 0}
+.modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
+.modal-note{font-size:11.5px;color:var(--dimmer);margin-top:10px}
 
-  .thinking{display:flex;gap:5px;align-items:center;color:var(--dimmer);font-style:italic;font-size:12.5px;margin-bottom:16px}
-  .dot{width:5px;height:5px;border-radius:50%;background:var(--dim);animation:pulse 1.3s infinite}
-  .dot:nth-child(2){animation-delay:.18s}.dot:nth-child(3){animation-delay:.36s}
-  @keyframes pulse{0%,60%,100%{opacity:.25}30%{opacity:1}}
+/* ───── ROSTER ───── */
+#pg-roster{background:var(--bg);overflow-y:auto}
+.roster-inner{max-width:820px;margin:0 auto;padding:44px 22px 60px}
+.roster-inner h1{font-size:24px;font-weight:600;margin-bottom:6px;letter-spacing:-.01em}
+.roster-lede{color:var(--dim);margin-bottom:22px}
+.mode-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 9px;border:1px solid var(--line);border-radius:20px;color:var(--dim);margin-bottom:20px;font-family:var(--mono)}
+.filter{width:100%;max-width:340px;margin-bottom:16px}
+.cand{display:flex;justify-content:space-between;align-items:center;gap:16px;border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-bottom:8px;background:var(--panel);transition:all .15s;cursor:pointer}
+.cand:hover{border-color:var(--dim);transform:translateX(2px)}
+.cand .who{font-weight:600}
+.cand .role{color:var(--dimmer);font-weight:400}
+.stats{display:flex;gap:14px;margin-top:6px;font-family:var(--mono);font-size:10.5px;color:var(--dimmer);align-items:center;flex-wrap:wrap}
+.ratio{display:flex;align-items:center;gap:6px}
+.rbar{width:46px;height:3px;background:var(--line);border-radius:2px;overflow:hidden}
+.rfill{height:3px}
+.tag{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;padding:1px 5px;border-radius:2px;border:1px solid}
 
-  .composer{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg) 18%);padding:14px 0 18px;margin-top:auto}
-  .cbox{display:flex;gap:8px;align-items:flex-end}
-  textarea{flex:1;font:14px/1.5 var(--sans);background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:5px;padding:11px 13px;resize:none;min-height:46px;max-height:190px;overflow-y:auto}
-  textarea:focus{outline:none;border-color:var(--accent)}
-  .hint{font-family:var(--mono);font-size:9.5px;color:var(--dimmer);margin-top:6px;letter-spacing:.05em}
+/* ───── INTERVIEW HEADER ───── */
+header{display:flex;align-items:center;gap:12px;padding:11px 18px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap;position:relative;flex-shrink:0}
+.brand{font-weight:600;letter-spacing:.16em;text-transform:uppercase;font-size:11.5px;white-space:nowrap}
+.pill{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;padding:2px 8px;border:1px solid var(--line);border-radius:3px;color:var(--dim);white-space:nowrap}
+.pill.live{color:var(--good);border-color:#26493c}
+.pill.off{color:var(--warn);border-color:#4a3f22}
+.spacer{flex:1}
+.progress{position:absolute;left:0;bottom:-1px;height:2px;background:var(--accent);transition:width .45s cubic-bezier(.4,0,.2,1)}
+.steps{display:flex;gap:3px;align-items:center}
+.step{width:15px;height:3px;border-radius:2px;background:var(--line);transition:background .3s}
+.step.on{background:var(--accent)}
+.step.now{background:var(--accent);box-shadow:0 0 0 2px rgba(110,168,254,.22)}
+.menu-btn{background:none;border:1px solid var(--line);border-radius:5px;color:var(--dim);padding:5px 10px;font-size:13px;display:flex;align-items:center;gap:5px}
+.menu-btn:hover{border-color:var(--dim);color:var(--text);background:var(--panel2)}
 
-  /* ---------- side ---------- */
-  .claim{margin-bottom:11px}
-  .claim .top{display:flex;justify-content:space-between;gap:8px;font-size:12px}
-  .belief{position:relative;height:4px;background:var(--line);margin-top:4px;border-radius:2px}
-  .bar{height:4px;border-radius:2px;transition:width .5s ease-out}
-  .prior{position:absolute;top:-3px;width:1px;height:10px;background:var(--dim)}
-  .sub{font-family:var(--mono);font-size:9px;color:var(--dimmer);margin-top:2px;text-transform:uppercase;letter-spacing:.05em}
-  .modrow{display:flex;gap:2px;margin-bottom:4px}
-  .modlab{font-family:var(--mono);font-size:8.5px;color:var(--dimmer);width:14px;flex:none;padding-top:2px}
-  .cells{display:flex;gap:2px;flex:1}
-  .cell{flex:1;height:11px;border:1px solid var(--soft);border-radius:1px}
-  .cell.hit{background:var(--accent);border-color:var(--accent)}
-  .trace li{list-style:none;padding:6px 0 6px 10px;border-left:2px solid var(--line);margin-bottom:2px;animation:rise .25s ease-out}
-  .trace .ag{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
-  .trace .dt{font-size:11.5px;color:var(--dim);margin-top:2px;line-height:1.4}
-  ul.trace{margin:0;padding:0}
+/* ───── INTERVIEW LAYOUT ───── */
+#pg-interview{background:var(--bg)}
+.iv-body{flex:1;display:grid;grid-template-columns:minmax(0,1fr);min-height:0;overflow:hidden}
+.iv-body.sidebar-open{grid-template-columns:minmax(0,1fr) 320px}
+.col{background:var(--bg);overflow-y:auto;overscroll-behavior:contain}
+#chat{display:flex;flex-direction:column;padding:20px 24px 0}
+#side{padding:18px 18px 40px;border-left:1px solid var(--line);background:var(--panel)}
+.col h2{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--dimmer);margin:0 0 12px;font-weight:600}
+@media(max-width:800px){
+  .iv-body.sidebar-open{grid-template-columns:1fr}
+  #side{border-left:none;border-top:1px solid var(--line)}
+}
 
-  /* ---------- report ---------- */
-  .report{border-top:1px solid var(--line);margin-top:20px;padding-top:20px;animation:rise .4s ease-out}
-  .verdict{display:flex;gap:26px;flex-wrap:wrap;margin:14px 0 20px;font-family:var(--mono);font-size:11px;color:var(--dimmer)}
-  .verdict b{display:block;font-size:20px;color:var(--text);margin-top:3px}
-  table{width:100%;border-collapse:collapse;font-size:12px}
-  th{text-align:left;font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--dimmer);padding:5px 7px;border-bottom:1px solid var(--line);font-weight:500}
-  td{padding:5px 7px;border-bottom:1px solid var(--soft)}
-  td.n{font-family:var(--mono);color:var(--dim)}
-  .tw{overflow-x:auto}
-  .item{padding:7px 0 7px 11px;border-left:2px solid var(--line);margin-bottom:6px;font-size:13px}
-  h3{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--dimmer);margin:22px 0 9px}
-  .err{border:1px solid #5a2b28;background:#1c1211;color:#e0a89f;padding:10px 13px;border-radius:4px;margin-bottom:14px}
+/* ───── CHAT MESSAGES ───── */
+.msg{margin-bottom:16px;max-width:80%;animation:rise .28s ease-out}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.msg.them{margin-right:auto}
+.msg.me{margin-left:auto}
+.bubble{padding:11px 14px;border-radius:6px;white-space:pre-wrap;word-wrap:break-word}
+.them .bubble{background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--accent)}
+.me .bubble{background:#16202e;border:1px solid #24344a}
+.qmeta{display:flex;gap:8px;flex-wrap:wrap;font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--dimmer);margin-bottom:5px;align-items:center}
+.kind{color:var(--accent)}
+.follows{color:var(--accent);cursor:pointer;text-decoration:underline dotted}
+.why{font-style:italic;color:var(--dimmer);font-size:12px;margin-top:6px;line-height:1.45}
+.scorecard{max-width:80%;margin:-8px 0 16px;padding:8px 12px;border:1px dashed var(--line);border-radius:5px;background:#0d0f13}
+.meters{display:flex;gap:16px;flex-wrap:wrap}
+.meter{font-family:var(--mono);font-size:9.5px;color:var(--dimmer)}
+.track{width:60px;height:3px;background:var(--line);margin-top:3px;border-radius:2px;overflow:hidden}
+.fill{height:3px;transition:width .5s ease-out}
+.flash{animation:flash 1.1s ease-out}
+@keyframes flash{0%{border-color:var(--accent)}100%{border-color:var(--line)}}
+.thinking{display:flex;gap:5px;align-items:center;color:var(--dimmer);font-style:italic;font-size:12.5px;margin-bottom:16px}
+.dot{width:5px;height:5px;border-radius:50%;background:var(--dim);animation:pulse 1.3s infinite}
+.dot:nth-child(2){animation-delay:.18s}.dot:nth-child(3){animation-delay:.36s}
+@keyframes pulse{0%,60%,100%{opacity:.25}30%{opacity:1}}
+.composer{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg) 18%);padding:14px 0 18px;margin-top:auto}
+.cbox{display:flex;gap:8px;align-items:flex-end}
+.cbox textarea{flex:1;min-height:46px;max-height:190px;overflow-y:auto;resize:none}
+.hint{font-family:var(--mono);font-size:9.5px;color:var(--dimmer);margin-top:6px;letter-spacing:.05em}
+
+/* ───── VOICE UI ───── */
+.voice-ui{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:40px 24px}
+.voice-question{max-width:600px;width:100%;background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--accent);border-radius:8px;padding:18px 20px}
+.voice-question .label{font-size:10px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;color:var(--accent);margin-bottom:8px}
+.voice-question .text{font-size:16px;line-height:1.6;color:var(--text)}
+.voice-transcript{max-width:600px;width:100%;min-height:60px;background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:14px 16px;font-size:14px;color:var(--dim);font-style:italic}
+.mic-wrap{display:flex;flex-direction:column;align-items:center;gap:14px}
+.mic-btn{width:80px;height:80px;border-radius:50%;border:2px solid var(--line);background:var(--panel);display:flex;align-items:center;justify-content:center;font-size:28px;cursor:pointer;transition:all .2s;position:relative}
+.mic-btn.listening{border-color:var(--bad);background:rgba(224,112,95,.1);animation:mic-pulse 1.5s infinite}
+@keyframes mic-pulse{0%,100%{box-shadow:0 0 0 0 rgba(224,112,95,.4)}50%{box-shadow:0 0 0 16px rgba(224,112,95,0)}}
+.mic-btn.speaking{border-color:var(--accent);background:rgba(110,168,254,.1)}
+.mic-status{font-size:12px;color:var(--dim);font-family:var(--mono);letter-spacing:.05em;text-transform:uppercase}
+.voice-steps{display:flex;gap:6px;margin-top:8px}
+.voice-step{width:24px;height:4px;border-radius:2px;background:var(--line);transition:background .3s}
+.voice-step.on{background:var(--accent)}
+.voice-step.now{background:var(--accent);box-shadow:0 0 0 2px rgba(110,168,254,.22)}
+
+/* ───── SIDEBAR ───── */
+.claim{margin-bottom:11px}
+.claim .top{display:flex;justify-content:space-between;gap:8px;font-size:12px}
+.belief{position:relative;height:4px;background:var(--line);margin-top:4px;border-radius:2px}
+.bar{height:4px;border-radius:2px;transition:width .5s ease-out}
+.prior{position:absolute;top:-3px;width:1px;height:10px;background:var(--dim)}
+.sub{font-family:var(--mono);font-size:9px;color:var(--dimmer);margin-top:2px;text-transform:uppercase;letter-spacing:.05em}
+.modrow{display:flex;gap:2px;margin-bottom:4px}
+.modlab{font-family:var(--mono);font-size:8.5px;color:var(--dimmer);width:14px;flex:none;padding-top:2px}
+.cells{display:flex;gap:2px;flex:1}
+.cell{flex:1;height:11px;border:1px solid var(--soft);border-radius:1px}
+.cell.hit{background:var(--accent);border-color:var(--accent)}
+.trace li{list-style:none;padding:6px 0 6px 10px;border-left:2px solid var(--line);margin-bottom:2px;animation:rise .25s ease-out}
+.trace .ag{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.trace .dt{font-size:11.5px;color:var(--dim);margin-top:2px;line-height:1.4}
+ul.trace{margin:0;padding:0}
+
+/* ───── REPORT ───── */
+.report{border-top:1px solid var(--line);margin-top:20px;padding-top:20px;animation:rise .4s ease-out}
+.verdict{display:flex;gap:26px;flex-wrap:wrap;margin:14px 0 20px;font-family:var(--mono);font-size:11px;color:var(--dimmer)}
+.verdict b{display:block;font-size:20px;color:var(--text);margin-top:3px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--dimmer);padding:5px 7px;border-bottom:1px solid var(--line);font-weight:500}
+td{padding:5px 7px;border-bottom:1px solid var(--soft)}
+td.n{font-family:var(--mono);color:var(--dim)}
+.tw{overflow-x:auto}
+.item{padding:7px 0 7px 11px;border-left:2px solid var(--line);margin-bottom:6px;font-size:13px}
+h3{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--dimmer);margin:22px 0 9px}
+.err{border:1px solid #5a2b28;background:#1c1211;color:#e0a89f;padding:10px 13px;border-radius:6px;margin-bottom:14px}
+
+/* ───── VOICE FEEDBACK ───── */
+.voice-feedback{max-width:600px;width:100%;animation:rise .4s ease-out}
+.voice-feedback h2{font-size:18px;font-weight:600;margin-bottom:12px}
+.voice-feedback .summary{font-size:15px;line-height:1.7;color:var(--dim);margin-bottom:20px;border-left:2px solid var(--accent);padding-left:14px}
+.fb-section{margin-bottom:16px}
+.fb-section h3{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--dimmer);margin-bottom:8px}
+.fb-item{padding:8px 12px 8px 14px;border-left:2px solid var(--line);margin-bottom:6px;font-size:13px;line-height:1.5}
 </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root">
+
+<!-- PAGE 1: WELCOME -->
+<div id="pg-welcome" class="page">
+  <div class="welcome-glow"></div>
+  <div class="welcome-logo">ABTalks · AI Cohort</div>
+  <h1 class="welcome-title">Welcome to the<br><span>Interview Agent</span></h1>
+  <p class="welcome-sub">An AI panel that reads a candidate's 31-day cohort record, forms explicit beliefs about what they understand, then interviews to test them.</p>
+  <button class="primary welcome-cta" id="welcome-start">Start Interview →</button>
+</div>
+
+<!-- PAGE 2: MODE SELECTION -->
+<div id="pg-mode" class="page hidden">
+  <div style="text-align:center">
+    <p class="mode-title">Choose your interview style</p>
+    <p class="mode-sub dim">How would you like to respond to questions?</p>
+    <div class="mode-cards">
+      <div class="mode-card" id="choose-chat">
+        <span class="icon">💬</span>
+        <div class="label">Chat Interview</div>
+        <div class="desc">Type your answers at your own pace. Full transcript shown in real time.</div>
+      </div>
+      <div class="mode-card" id="choose-voice">
+        <span class="icon">🎙️</span>
+        <div class="label">Voice Interview</div>
+        <div class="desc">Speak your answers. The agent listens, responds, and delivers feedback aloud.</div>
+      </div>
+    </div>
+    <button class="mode-back" id="mode-back">← Back</button>
+  </div>
+</div>
+
+<!-- MODAL: CHAT SETUP -->
+<div class="backdrop" id="modal-chat">
+  <div class="modal">
+    <h2>Chat Interview Setup</h2>
+    <p class="sub">Enter your Groq API key to power the AI interviewer.</p>
+    <div class="field">
+      <label>Groq API Key</label>
+      <input type="password" id="chat-groq-key" placeholder="gsk_…" autocomplete="off"/>
+      <a class="field-link" href="https://console.groq.com/keys" target="_blank">↗ Get a free key at console.groq.com</a>
+    </div>
+    <p class="modal-note">Leave blank if the server already has a key configured.</p>
+    <div class="modal-footer">
+      <button class="ghost" id="chat-modal-cancel">Cancel</button>
+      <button class="primary" id="chat-modal-start">Choose Candidate →</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: VOICE SETUP -->
+<div class="backdrop" id="modal-voice">
+  <div class="modal">
+    <h2>Voice Interview Setup</h2>
+    <p class="sub">Connect your LLM provider and LiveKit voice room.</p>
+    <div class="field">
+      <label>Groq API Key (LLM)</label>
+      <input type="password" id="voice-groq-key" placeholder="gsk_…" autocomplete="off"/>
+      <a class="field-link" href="https://console.groq.com/keys" target="_blank">↗ Get a free key at console.groq.com</a>
+    </div>
+    <hr class="modal-sep"/>
+    <p style="font-size:12px;color:var(--dim);margin-bottom:14px;font-weight:500;text-transform:uppercase;letter-spacing:.05em">LiveKit — Voice Transport</p>
+    <div class="field">
+      <label>LiveKit URL</label>
+      <input type="text" id="voice-lk-url" placeholder="wss://myproject.livekit.cloud" autocomplete="off"/>
+    </div>
+    <div class="field">
+      <label>LiveKit API Key</label>
+      <input type="text" id="voice-lk-apikey" placeholder="APIxxxxxxxxxxxxxx" autocomplete="off"/>
+    </div>
+    <div class="field">
+      <label>LiveKit API Secret</label>
+      <input type="password" id="voice-lk-secret" placeholder="Secret…" autocomplete="off"/>
+      <a class="field-link" href="https://cloud.livekit.io" target="_blank">↗ Get LiveKit credentials at cloud.livekit.io</a>
+    </div>
+    <div class="modal-footer">
+      <button class="ghost" id="voice-modal-cancel">Cancel</button>
+      <button class="primary" id="voice-modal-start">Choose Candidate →</button>
+    </div>
+  </div>
+</div>
+
+<!-- PAGE 3: ROSTER -->
+<div id="pg-roster" class="page hidden">
+  <div class="roster-inner">
+    <h1>Choose your candidate</h1>
+    <p class="roster-lede dim">Select a candidate from the 31-day AI cohort to begin the interview.</p>
+    <div id="roster-mode-badge"></div>
+    <input class="filter" id="roster-filter" placeholder="Filter by name or role…"/>
+    <div id="roster-list"></div>
+  </div>
+</div>
+
+<!-- PAGE 4: INTERVIEW -->
+<div id="pg-interview" class="page hidden">
+  <!-- header injected by renderHeader() -->
+  <div class="iv-body" id="iv-body">
+    <!-- chat or voice column injected here -->
+    <section class="col" id="side" style="display:none"></section>
+  </div>
+</div>
+
+</div><!-- #root -->
 
 <script>
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
 const $ = (h) => { const t=document.createElement('template'); t.innerHTML=h.trim(); return t.content.firstChild; };
-const esc = (s) => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const col = (v) => v>=.65?'var(--good)':v>=.4?'var(--warn)':'var(--bad)';
+const esc = s => String(s??'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const col = v => v>=.65?'var(--good)':v>=.4?'var(--warn)':'var(--bad)';
+const MODULES = [[1,3],[4,6],[7,10],[11,15],[16,20],[21,24],[25,28],[29,31]];
 
-const MODULES=[[1,3],[4,6],[7,10],[11,15],[16,20],[21,24],[25,28],[29,31]];
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────────────────────────
+const S = {
+  page: 'welcome',      // welcome | mode | roster | interview
+  mode: null,           // chat | voice
+  keys: { groq:'', livekitUrl:'', livekitApiKey:'', livekitApiSecret:'' },
 
-const state = {
-  sessionId:null, candidate:null, messages:[], insight:null, done:false,
-  feedback:null, busy:false, error:null, engine:null, roster:[], total:8,
-  filter:'', draft:''
+  // interview
+  sessionId: null, candidate: null, messages: [], insight: null,
+  done: false, feedback: null, busy: false, error: null,
+  engine: null, roster: [], total: 8, filter: '', draft: '',
+  sidebarOpen: false,
+
+  // voice
+  voiceQuestion: '', voiceStatus: 'idle', voiceTranscript: '',
+  voiceDone: false,
 };
 
-// Scroll bookkeeping. render() rebuilds the DOM, which resets scrollTop to 0
-// and snaps the transcript back to question one. We restore it every time, and
-// stick to the bottom whenever the conversation has actually moved on.
-let stick = true, chatTop = 0, sideTop = 0;
-//: Set while we move the scrollbar ourselves, so our own restore is not
-//: mistaken for the reader scrolling away from the newest message.
-let ignoreScroll = false;
+let stick=true, chatTop=0, sideTop=0, ignoreScroll=false;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PAGE NAV
+// ─────────────────────────────────────────────────────────────────────────────
+function gotoPage(name){
+  document.querySelectorAll('.page').forEach(p=>p.classList.add('hidden'));
+  const pg = document.getElementById('pg-'+name);
+  if(pg) pg.classList.remove('hidden');
+  S.page = name;
+}
+
+function openModal(id){ document.getElementById(id).classList.add('open'); }
+function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BOOT
+// ─────────────────────────────────────────────────────────────────────────────
 async function api(path, body){
   const opt = body ? {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)} : {};
   const r = await fetch(path, opt);
   const d = await r.json();
-  if(!r.ok) throw new Error(d.error || ('HTTP '+r.status));
+  if(!r.ok) throw new Error(d.error||('HTTP '+r.status));
   return d;
 }
 
 async function boot(){
+  initVoices(); // start loading TTS voices early
   try{
     const [h, c] = await Promise.all([api('/api/health'), api('/api/candidates')]);
-    state.engine = h.llm; state.roster = c.candidates;
-    state.total = (h.interview && h.interview.max_questions) || 8;
-  }catch(e){ state.error = String(e); }
-  render();
+    S.engine = h.llm;
+    S.roster = c.candidates;
+    S.total = (h.interview&&h.interview.max_questions)||8;
+  }catch(e){ S.error = String(e); }
 }
 
-async function start(cand){
-  state.busy=true; state.error=null; state.candidate=cand;
-  state.sessionId = 'sess-' + Math.random().toString(36).slice(2,10);
-  state.messages=[]; state.done=false; state.feedback=null; state.insight=null; state.draft='';
-  stick=true; chatTop=0; sideTop=0;
-  render();
-  try{
-    const d = await api('/api/interview', { sessionId: state.sessionId, candidate: cand.candidate });
-    state.messages.push({who:'them', text:d.reply});
-    state.insight = d.insight;
-  }catch(e){ state.error = String(e); }
-  state.busy=false; render();
-}
-
-async function send(text){
-  if(!text.trim() || state.busy || state.done) return;
-  state.messages.push({who:'me', text}); state.busy=true; state.draft=''; stick=true;
-  render();
-  try{
-    const d = await api('/api/interview', { sessionId: state.sessionId, message: text });
-    state.messages.push({who:'them', text:d.reply});
-    state.insight = d.insight;
-    if(d.done){ state.done=true; state.feedback=d.feedback; }
-  }catch(e){ state.error = String(e); }
-  state.busy=false; stick=true; render();
-}
-
-function reset(){
-  state.sessionId=null; state.messages=[]; state.insight=null;
-  state.done=false; state.feedback=null; state.error=null; state.draft='';
-  render();
-}
-
-function turnFor(i){
-  const t = state.insight?.transcript || [];
-  const idx = state.messages.slice(0,i+1).filter(m=>m.who==='them').length - 1;
-  return t[idx] || null;
-}
-
-function fmtRatio(c){
-  return c.missionsCompleted ? c.missionsFirstTry / c.missionsCompleted : 0;
-}
-
-/* ---------------------------------------------------------------- render */
-
-function render(){
-  const root = document.getElementById('root');
-  root.innerHTML = '';
-  if(!state.sessionId){ renderPicker(root); return; }
-  renderInterview(root);
-}
-
-function renderPicker(root){
-  const eng = state.engine ? (state.engine.live
-    ? `<span class="pill live">${esc(state.engine.main_model)}</span>`
-    : `<span class="pill off">offline deterministic</span>`) : '';
-
-  root.appendChild($(`<div class="picker">
-    <h1>ABTalks Interview Agent</h1>
-    <p class="lede">The panel reads a candidate's cohort record, forms explicit beliefs about what they
-    understand, then spends ${state.total} questions testing them. It reports what it believed before,
-    what it believes now, and which answer changed its mind. ${eng}</p>
-    ${state.error?`<div class="err">${esc(state.error)}</div>`:''}
-    <input class="filter" placeholder="Filter by name or role…" />
-    <div id="roster"></div>
-  </div>`));
-
-  const input = root.querySelector('.filter');
-  input.value = state.filter;
-  input.oninput = (e)=>{ state.filter=e.target.value; paintRoster(); };
-  paintRoster();
-  setTimeout(()=>input.focus(),0);
-}
-
+// ─────────────────────────────────────────────────────────────────────────────
+// ROSTER
+// ─────────────────────────────────────────────────────────────────────────────
 function paintRoster(){
-  const box = document.getElementById('roster');
-  if(!box) return;
+  const box = document.getElementById('roster-list'); if(!box) return;
   box.innerHTML='';
-  const q = state.filter.trim().toLowerCase();
-  const list = (state.roster||[]).filter(c=>
-    !q || c.name.toLowerCase().includes(q) || (c.jobRole||'').toLowerCase().includes(q));
-
-  if(!list.length){ box.appendChild($('<p class="dimmer">No candidate matches that.</p>')); return; }
-
+  const q = (document.getElementById('roster-filter')?.value||'').trim().toLowerCase();
+  const list = (S.roster||[]).filter(c=>!q||c.name.toLowerCase().includes(q)||(c.jobRole||'').toLowerCase().includes(q));
+  if(!list.length){ box.appendChild($('<p class="dimmer" style="margin-top:12px">No candidates match.</p>')); return; }
   list.forEach(c=>{
-    const r = fmtRatio(c);
-    // Two candidates can both finish 31 missions — one first-time, one after
-    // five attempts every go. Surfacing that ratio is the single most useful
-    // thing this list can show.
-    const tag = r>=.85 ? `<span class="tag" style="color:var(--good);border-color:#26493c">fluent</span>`
-              : r<=.2  ? `<span class="tag" style="color:var(--warn);border-color:#4a3f22">grinder</span>`
-              : c.missionsCompleted<20 ? `<span class="tag" style="color:var(--dim);border-color:var(--line)">sparse</span>` : '';
+    const r = c.missionsCompleted ? c.missionsFirstTry/c.missionsCompleted : 0;
+    const tag = r>=.85?`<span class="tag" style="color:var(--good);border-color:#26493c">fluent</span>`
+               :r<=.2?`<span class="tag" style="color:var(--warn);border-color:#4a3f22">grinder</span>`
+               :c.missionsCompleted<20?`<span class="tag" style="color:var(--dim);border-color:var(--line)">sparse</span>`:'';
     const el = $(`<div class="cand">
       <div style="min-width:0">
-        <div><span class="who">${esc(c.name)}</span>
-          <span class="role">${esc(c.jobRole)} · ${c.yearsExperience}y</span> ${tag}</div>
+        <div><span class="who">${esc(c.name)}</span> <span class="role">${esc(c.jobRole)} · ${c.yearsExperience}y</span> ${tag}</div>
         <div class="stats">
           <span>${c.missionsCompleted}/31 missions</span>
           <span class="ratio">first-try
@@ -281,180 +396,253 @@ function paintRoster(){
           <span>${c.commitDays} commit days</span>
         </div>
       </div>
-      <button class="primary">Interview</button></div>`);
-    el.querySelector('button').onclick = ()=>start(c);
+      <button class="primary">Interview</button>
+    </div>`);
+    el.querySelector('button').onclick = ()=>startInterview(c);
     box.appendChild(el);
   });
 }
 
-function renderInterview(root){
-  const ins = state.insight || {};
-  const asked = (ins.transcript||[]).length || state.messages.filter(m=>m.who==='them').length;
-  const answered = ins.questionsAsked || 0;
-  const total = state.total;
+// ─────────────────────────────────────────────────────────────────────────────
+// CHAT INTERVIEW
+// ─────────────────────────────────────────────────────────────────────────────
+async function startInterview(cand){
+  S.candidate = cand;
+  S.sessionId = 'sess-'+Math.random().toString(36).slice(2,10);
+  S.messages=[]; S.done=false; S.feedback=null; S.insight=null; S.draft=''; S.error=null;
+  stick=true; chatTop=0; sideTop=0;
+  gotoPage('interview');
 
+  if(S.mode==='voice'){
+    await startVoiceInterview(cand);
+    return;
+  }
+
+  // chat mode
+  renderChatLayout();
+  S.busy=true; renderChatMessages();
+  try{
+    const d = await api('/api/interview',{sessionId:S.sessionId,candidate:cand.candidate});
+    S.messages.push({who:'them',text:d.reply});
+    S.insight = d.insight;
+  }catch(e){ S.error=String(e); }
+  S.busy=false; renderChatMessages();
+}
+
+async function sendChat(text){
+  if(!text.trim()||S.busy||S.done) return;
+  S.messages.push({who:'me',text}); S.busy=true; S.draft=''; stick=true;
+  renderChatMessages();
+  try{
+    const d = await api('/api/interview',{sessionId:S.sessionId,message:text});
+    S.messages.push({who:'them',text:d.reply});
+    S.insight=d.insight;
+    if(d.done){ S.done=true; S.feedback=d.feedback; }
+  }catch(e){ S.error=String(e); }
+  S.busy=false; stick=true; renderChatMessages();
+}
+
+function resetInterview(){
+  S.sessionId=null; S.messages=[]; S.insight=null;
+  S.done=false; S.feedback=null; S.error=null; S.draft='';
+  S.voiceQuestion=''; S.voiceStatus='idle'; S.voiceTranscript=''; S.voiceDone=false;
+  stopVoice();
+  gotoPage('roster');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RENDER CHAT LAYOUT
+// ─────────────────────────────────────────────────────────────────────────────
+function renderChatLayout(){
+  const ivBody = document.getElementById('iv-body');
+  const side = document.getElementById('side');
+  // Clear and rebuild header
+  const existingHeader = document.querySelector('#pg-interview header');
+  if(existingHeader) existingHeader.remove();
+  renderInterviewHeader();
+
+  // Remove old chat col if any
+  const oldChat = document.getElementById('chat');
+  if(oldChat) oldChat.remove();
+
+  // Create chat column
+  const chatCol = document.createElement('section');
+  chatCol.className='col'; chatCol.id='chat';
+  chatCol.style.display='flex'; chatCol.style.flexDirection='column';
+  chatCol.style.padding='20px 24px 0';
+  ivBody.insertBefore(chatCol, side);
+
+  // Sidebar state
+  side.style.display = S.sidebarOpen ? 'block' : 'none';
+  ivBody.className = 'iv-body' + (S.sidebarOpen?' sidebar-open':'');
+
+  renderChatMessages();
+}
+
+function renderInterviewHeader(){
+  const pg = document.getElementById('pg-interview');
+  const ins = S.insight||{};
+  const answered = ins.questionsAsked||0;
+  const total = S.total;
+  const asked = (ins.transcript||[]).length||S.messages.filter(m=>m.who==='them').length;
   const steps = Array.from({length:total},(_,i)=>{
-    const cls = i < answered ? 'on' : (i === answered && !state.done ? 'now' : '');
+    const cls = i<answered?'on':(i===answered&&!S.done?'now':'');
     return `<span class="step ${cls}"></span>`;
   }).join('');
-
   const head = $(`<header>
-    <span class="brand">ABTalks Interview</span>
-    <span class="pill">${esc(state.candidate?.name||'')}</span>
+    <span class="brand">ABTalks</span>
+    <span class="pill">${esc(S.candidate?.name||'')}</span>
     <div class="steps" title="${answered} of ${total} answered">${steps}</div>
-    <span class="mono dimmer" style="font-size:11px">${state.done?'complete':`question ${Math.min(asked,total)} of ${total}`}</span>
+    <span class="mono dimmer" style="font-size:11px">${S.done?'complete':`Q${Math.min(asked,total)} of ${total}`}</span>
     <span class="spacer"></span>
     <span class="pill">${(ins.daysCovered||[]).length} days</span>
-    ${state.engine? (state.engine.live?`<span class="pill live">groq</span>`:`<span class="pill off">offline</span>`):''}
-    <button class="ghost" id="newiv">New interview</button>
+    ${S.engine?(S.engine.live?`<span class="pill live">groq</span>`:`<span class="pill off">offline</span>`):''}
+    ${S.mode==='chat'?`<button class="menu-btn" id="sidebar-toggle">☰ Panel</button>`:''}
+    <button class="ghost" id="newiv-btn" style="font-size:12px">← Candidates</button>
     <div class="progress" style="width:${(answered/total*100).toFixed(1)}%"></div>
   </header>`);
-  root.appendChild(head);
-  head.querySelector('#newiv').onclick = reset;
+  pg.insertBefore(head, pg.firstChild);
+  head.querySelector('#newiv-btn').onclick = resetInterview;
+  const stb = head.querySelector('#sidebar-toggle');
+  if(stb) stb.onclick = toggleSidebar;
+}
 
-  const grid = $(`<div class="grid"><section class="col" id="chat"></section><section class="col" id="side"></section></div>`);
-  root.appendChild(grid);
-  const chat = grid.querySelector('#chat');
-  const side = grid.querySelector('#side');
+function toggleSidebar(){
+  S.sidebarOpen = !S.sidebarOpen;
+  const side = document.getElementById('side');
+  const ivBody = document.getElementById('iv-body');
+  side.style.display = S.sidebarOpen?'block':'none';
+  ivBody.className = 'iv-body'+(S.sidebarOpen?' sidebar-open':'');
+  if(S.sidebarOpen) paintSide(side, S.insight||{});
+}
 
-  if(state.error) chat.appendChild($(`<div class="err">${esc(state.error)}</div>`));
+function renderChatMessages(){
+  const chat = document.getElementById('chat'); if(!chat) return;
+  // Update header
+  const existingHeader = document.querySelector('#pg-interview header');
+  if(existingHeader) existingHeader.remove();
+  renderInterviewHeader();
 
-  state.messages.forEach((m,i)=>{
+  // Update sidebar if open
+  if(S.sidebarOpen){ const side=document.getElementById('side'); paintSide(side,S.insight||{}); }
+
+  chat.innerHTML='';
+  if(S.error) chat.appendChild($(`<div class="err">${esc(S.error)}</div>`));
+
+  S.messages.forEach((m,i)=>{
     if(m.who==='me'){
       chat.appendChild($(`<div class="msg me"><div class="bubble">${esc(m.text)}</div></div>`));
       return;
     }
     const t = turnFor(i);
-    const meta = t ? `<div class="qmeta"><span>Q${t.n}</span><span class="kind">${esc(t.kind)}</span>
+    const meta = t?`<div class="qmeta"><span>Q${t.n}</span><span class="kind">${esc(t.kind)}</span>
       <span>day ${t.day}</span><span>${esc(t.concept)}</span>
-      ${t.derivedFrom?`<span class="follows" data-q="${t.derivedFrom}">follows Q${t.derivedFrom}</span>`:''}</div>` : '';
-    const why = t && t.rationale ? `<div class="why">why this question now: ${esc(t.rationale)}</div>` : '';
+      ${t.derivedFrom?`<span class="follows" data-q="${t.derivedFrom}">follows Q${t.derivedFrom}</span>`:''}</div>`:'';
+    const why = t&&t.rationale?`<div class="why">why this question now: ${esc(t.rationale)}</div>`:'';
     const el = $(`<div class="msg them" data-q="${t?t.n:''}">${meta}<div class="bubble">${esc(m.text)}</div>${why}</div>`);
     chat.appendChild(el);
-
-    if(t && t.scores){
-      const mt = ['correctness','depth','specificity'].map(k=>
+    if(t&&t.scores){
+      const mt=['correctness','depth','specificity'].map(k=>
         `<div class="meter">${k} ${t.scores[k].toFixed(2)}<div class="track"><div class="fill" style="width:${t.scores[k]*100}%;background:${col(t.scores[k])}"></div></div></div>`).join('');
       chat.appendChild($(`<div class="scorecard"><div class="meters">${mt}</div>
         <div class="why" style="margin-top:6px">${esc(t.scores.note)}</div></div>`));
     }
   });
 
-  // jump-to-source for follow-ups
   chat.querySelectorAll('.follows').forEach(el=>{
-    el.onclick = ()=>{
-      const target = chat.querySelector(`.msg.them[data-q="${el.dataset.q}"]`);
+    el.onclick=()=>{
+      const target=chat.querySelector(`.msg.them[data-q="${el.dataset.q}"]`);
       if(target){ stick=false; target.scrollIntoView({behavior:'smooth',block:'center'});
         target.classList.add('flash'); setTimeout(()=>target.classList.remove('flash'),1200); }
     };
   });
 
-  if(state.busy){
-    chat.appendChild($(`<div class="thinking"><span class="dot"></span><span class="dot"></span><span class="dot"></span> the panel is thinking</div>`));
-  }
-
-  if(state.done && state.feedback) chat.appendChild(reportEl(ins));
+  if(S.busy) chat.appendChild($(`<div class="thinking"><span class="dot"></span><span class="dot"></span><span class="dot"></span> the panel is thinking</div>`));
+  if(S.done&&S.feedback) chat.appendChild(reportEl(S.insight||{}));
   else chat.appendChild(composerEl());
 
-  paintSide(side, ins);
-
-  // Restore scroll AFTER layout, otherwise the browser has nothing to scroll.
+  // scroll restore
   requestAnimationFrame(()=>{
-    // Below 900px the layout stacks and the PAGE scrolls instead of the
-    // column, so the transcript position lives on window. Handling only the
-    // column would leave the same jump-to-Q1 bug on a narrow window.
-    const columnScrolls = chat.scrollHeight > chat.clientHeight + 4;
-    const scroller = {
-      get top(){ return columnScrolls ? chat.scrollTop : window.scrollY; },
-      set top(v){ columnScrolls ? (chat.scrollTop = v) : window.scrollTo(0, v); },
-      get max(){ return columnScrolls ? chat.scrollHeight : document.body.scrollHeight; },
-      get view(){ return columnScrolls ? chat.clientHeight : window.innerHeight; },
+    const columnScrolls = chat.scrollHeight > chat.clientHeight+4;
+    const scroller={
+      get top(){ return columnScrolls?chat.scrollTop:window.scrollY; },
+      set top(v){ columnScrolls?(chat.scrollTop=v):window.scrollTo(0,v); },
+      get max(){ return columnScrolls?chat.scrollHeight:document.body.scrollHeight; },
+      get view(){ return columnScrolls?chat.clientHeight:window.innerHeight; },
     };
-
-    ignoreScroll = true;
-    side.scrollTop = sideTop;
-    scroller.top = stick ? scroller.max : chatTop;
+    ignoreScroll=true;
+    const side=document.getElementById('side'); if(side) side.scrollTop=sideTop;
+    scroller.top = stick?scroller.max:chatTop;
     chatTop = scroller.top;
-    // Release on the next frame, once the browser has emitted the scroll
-    // events caused by the assignments above.
-    requestAnimationFrame(()=>{ ignoreScroll = false; });
-
-    const onMove = ()=>{
-      if(ignoreScroll) return;
-      chatTop = scroller.top;
-      // If the reader scrolls up to re-read, stop yanking them to the bottom.
-      stick = scroller.max - scroller.top - scroller.view < 90;
-    };
-    if(columnScrolls){
-      chat.onscroll = onMove;
-      window.onscroll = null;
-    }else{
-      chat.onscroll = null;
-      window.onscroll = onMove;
-    }
-    side.onscroll = ()=>{ if(!ignoreScroll) sideTop = side.scrollTop; };
+    requestAnimationFrame(()=>{ ignoreScroll=false; });
+    const onMove=()=>{ if(ignoreScroll)return; chatTop=scroller.top; stick=scroller.max-scroller.top-scroller.view<90; };
+    if(columnScrolls){ chat.onscroll=onMove; window.onscroll=null; }
+    else{ chat.onscroll=null; window.onscroll=onMove; }
+    if(side) side.onscroll=()=>{ if(!ignoreScroll) sideTop=side.scrollTop; };
   });
 }
 
+function turnFor(i){
+  const t=(S.insight?.transcript)||[];
+  const idx=S.messages.slice(0,i+1).filter(m=>m.who==='them').length-1;
+  return t[idx]||null;
+}
+
 function composerEl(){
-  const comp = $(`<div class="composer">
+  const comp=$(`<div class="composer">
     <div class="cbox">
       <textarea placeholder="Answer as the candidate…"></textarea>
       <button class="primary">Send</button>
     </div>
-    <div class="hint">Enter to send · Shift+Enter for a new line</div>
+    <div class="hint">Enter to send · Shift+Enter for new line</div>
   </div>`);
-  const ta = comp.querySelector('textarea'), btn = comp.querySelector('button');
-  ta.value = state.draft;
-  btn.disabled = state.busy;
-
-  const grow = ()=>{ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,190)+'px'; };
-  const fire = ()=>{ const v=ta.value; if(!v.trim())return; ta.value=''; grow(); send(v); };
-
-  ta.oninput = ()=>{ state.draft=ta.value; grow(); };
-  ta.onkeydown = (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); fire(); } };
-  btn.onclick = fire;
-
-  setTimeout(()=>{ grow(); if(!state.busy) ta.focus(); ta.selectionStart=ta.value.length; },0);
+  const ta=comp.querySelector('textarea'),btn=comp.querySelector('button');
+  ta.value=S.draft; btn.disabled=S.busy;
+  const grow=()=>{ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,190)+'px'; };
+  const fire=()=>{ const v=ta.value; if(!v.trim())return; ta.value=''; grow(); sendChat(v); };
+  ta.oninput=()=>{ S.draft=ta.value; grow(); };
+  ta.onkeydown=e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); fire(); } };
+  btn.onclick=fire;
+  setTimeout(()=>{ grow(); if(!S.busy) ta.focus(); ta.selectionStart=ta.value.length; },0);
   return comp;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SIDEBAR
+// ─────────────────────────────────────────────────────────────────────────────
 function paintSide(side, ins){
-  const hit = new Set(ins.daysCovered||[]);
-
+  side.innerHTML='';
+  const hit=new Set(ins.daysCovered||[]);
   side.appendChild($('<h2>Coverage</h2>'));
-  const cov = $('<div style="margin-bottom:6px"></div>');
+  const cov=$('<div style="margin-bottom:6px"></div>');
   MODULES.forEach(([a,b],i)=>{
-    const cells = Array.from({length:b-a+1},(_,k)=>{
+    const cells=Array.from({length:b-a+1},(_,k)=>{
       const d=a+k;
       return `<div class="cell${hit.has(d)?' hit':''}" title="day ${d}"></div>`;
     }).join('');
     cov.appendChild($(`<div class="modrow"><span class="modlab">M${i+1}</span><span class="cells">${cells}</span></div>`));
   });
   side.appendChild(cov);
-  const mods = new Set();
+  const mods=new Set();
   MODULES.forEach(([a,b],i)=>{ for(const d of hit) if(d>=a&&d<=b) mods.add(i+1); });
-  side.appendChild($(`<div class="mono dimmer" style="font-size:10px;margin-bottom:20px">
-    ${hit.size} days · ${mods.size} modules <span style="color:var(--dimmer)">· floor 4 days / 3 modules</span></div>`));
-
-  side.appendChild($('<h2>Evidence ledger</h2>'));
-  const led = (ins.ledger||[]).slice(0,18);
+  side.appendChild($(`<div class="mono dimmer" style="font-size:10px;margin-bottom:20px">${hit.size} days · ${mods.size} modules</div>`));
+  side.appendChild($('<h2>Evidence Ledger</h2>'));
+  const led=(ins.ledger||[]).slice(0,16);
   if(!led.length) side.appendChild($('<p class="dimmer" style="font-size:12px">Priors appear once the interview starts.</p>'));
   led.forEach(c=>{
-    const moved = Math.abs((c.belief??0)-(c.prior??0)) > .02;
+    const moved=Math.abs((c.belief??0)-(c.prior??0))>.02;
     side.appendChild($(`<div class="claim">
       <div class="top"><span>${esc(c.concept)}</span>
         <span class="mono dim">${c.belief.toFixed(2)}${moved?` <span style="color:${c.belief>c.prior?'var(--good)':'var(--bad)'}">${c.belief>c.prior?'↑':'↓'}</span>`:''}</span></div>
       <div class="belief"><div class="bar" style="width:${c.belief*100}%;background:${col(c.belief)}"></div>
-      <div class="prior" style="left:${c.prior*100}%" title="believed ${c.prior.toFixed(2)} before"></div></div>
-      <div class="sub">day ${c.day} · ${esc(c.status)} · ${esc(c.source)} · ${c.probes} ev</div></div>`));
+      <div class="prior" style="left:${c.prior*100}%" title="prior ${c.prior.toFixed(2)}"></div></div>
+      <div class="sub">day ${c.day} · ${esc(c.status)} · ${c.probes} ev</div></div>`));
   });
-
-  side.appendChild($('<h2 style="margin-top:24px">Agent trace</h2>'));
-  const ul = $('<ul class="trace"></ul>');
-  const colours = {ProfileAnalyst:'#c78ce0',Director:'#6ea8fe',Interviewer:'#7fd6e8',Assessor:'#e0705f',Ledger:'#9aa4b2',ClaimVerifier:'#d99ac0',Feedback:'#8fd66a'};
-  (ins.trace||[]).slice(-40).forEach(e=>{
-    const c = colours[e.agent]||'#8b929e';
+  side.appendChild($('<h2 style="margin-top:24px">Agent Trace</h2>'));
+  const ul=$('<ul class="trace"></ul>');
+  const colours={ProfileAnalyst:'#c78ce0',Director:'#6ea8fe',Interviewer:'#7fd6e8',Assessor:'#e0705f',Ledger:'#9aa4b2',ClaimVerifier:'#d99ac0',Feedback:'#8fd66a'};
+  (ins.trace||[]).slice(-30).forEach(e=>{
+    const c=colours[e.agent]||'#8b929e';
     ul.appendChild($(`<li style="border-left-color:${c}"><span class="ag" style="color:${c}">${esc(e.agent)}</span>
       <span class="mono dimmer" style="font-size:9.5px"> ${esc(e.action)}</span>
       <div class="dt">${esc(e.detail)}</div></li>`));
@@ -462,15 +650,18 @@ function paintSide(side, ins){
   side.appendChild(ul);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// REPORT
+// ─────────────────────────────────────────────────────────────────────────────
 function reportEl(ins){
-  const f = state.feedback, cal = ins.calibration||[];
-  const moved = cal.filter(r=>Math.abs(r.delta)>0.02);
-  const over = cal.filter(r=>r.verdict==='overclaimed').length;
-  const el = $(`<div class="report">
+  const f=S.feedback, cal=ins.calibration||[];
+  const moved=cal.filter(r=>Math.abs(r.delta)>.02);
+  const over=cal.filter(r=>r.verdict==='overclaimed').length;
+  const el=$(`<div class="report">
     <h3>Interview complete</h3>
     <p style="font-size:15px;line-height:1.6">${esc(f.summary)}</p>
     <div class="verdict">
-      <div>questions<b>${ins.questionsAsked||state.total}</b></div>
+      <div>questions<b>${ins.questionsAsked||S.total}</b></div>
       <div>days covered<b>${(ins.daysCovered||[]).length}</b></div>
       <div>beliefs moved<b>${moved.length}</b></div>
       <div>overclaimed<b style="color:${over?'var(--bad)':'var(--text)'}">${over}</b></div>
@@ -478,20 +669,523 @@ function reportEl(ins){
     <h3>Strengths</h3>${f.strengths.map(x=>`<div class="item" style="border-left-color:var(--good)">${esc(x)}</div>`).join('')}
     <h3>Gaps</h3>${f.gaps.map(x=>`<div class="item" style="border-left-color:var(--bad)">${esc(x)}</div>`).join('')}
     <h3>What to do next</h3>${f.next.map(x=>`<div class="item">${esc(x)}</div>`).join('')}
-    <h3>Calibration — believed before vs. found</h3>
+    <h3>Calibration</h3>
     <div class="tw"><table><thead><tr><th>day</th><th>topic</th><th>before</th><th></th><th>after</th><th>verdict</th></tr></thead>
     <tbody>${(moved.length?moved:cal).map(r=>`<tr><td class="n">${r.day}</td><td>${esc(r.concept)}</td>
       <td class="n">${r.prior.toFixed(2)}</td>
-      <td class="n" style="color:${r.delta>0.02?'var(--good)':r.delta<-0.02?'var(--bad)':'var(--dimmer)'}">${r.delta>0.02?'↑':r.delta<-0.02?'↓':'→'}</td>
+      <td class="n" style="color:${r.delta>.02?'var(--good)':r.delta<-.02?'var(--bad)':'var(--dimmer)'}">${r.delta>.02?'↑':r.delta<-.02?'↓':'→'}</td>
       <td class="n">${r.posterior.toFixed(2)}</td>
       <td class="mono" style="font-size:10px;color:${r.verdict==='overclaimed'?'var(--bad)':r.verdict==='underrated'?'var(--good)':'var(--dim)'}">${esc(r.verdict)}</td></tr>`).join('')}
     </tbody></table></div>
-    <div style="margin:22px 0 10px"><button class="primary" id="again">Interview someone else</button></div>
+    <div style="margin:22px 0 10px"><button class="primary" id="again-btn">Interview someone else</button></div>
   </div>`);
-  setTimeout(()=>{ const b=document.getElementById('again'); if(b) b.onclick=reset; },0);
+  setTimeout(()=>{ const b=document.getElementById('again-btn'); if(b) b.onclick=resetInterview; },0);
   return el;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// VOICE INTERVIEW
+// ─────────────────────────────────────────────────────────────────────────────
+let synth=window.speechSynthesis, livekitRoom=null;
+let voiceTurns=[], voiceRunning=false;
+let audioCtx=null, micStream=null, mediaRecorder=null, silenceRaf=null;
+let selectedVoice=null;
+
+// ── TTS Voice selection: pick the best available neural/natural voice ──
+function selectBestVoice(){
+  const voices = synth.getVoices();
+  if(!voices.length) return null;
+  const rules = [
+    v => /google.*english/i.test(v.name) && v.lang.startsWith('en'),
+    v => /google/i.test(v.name) && v.lang==='en-US',
+    v => /(natural|neural|premium|enhanced)/i.test(v.name) && v.lang.startsWith('en-US'),
+    v => /microsoft.*(aria|jenny|guy|davis).*(online|neural)/i.test(v.name),
+    v => /microsoft.*natural/i.test(v.name) && v.lang.startsWith('en'),
+    v => !v.localService && v.lang==='en-US',
+    v => v.lang==='en-US',
+    v => v.lang.startsWith('en'),
+  ];
+  for(const rule of rules){ const m=voices.find(rule); if(m) return m; }
+  return voices[0]||null;
+}
+
+function initVoices(){
+  selectedVoice = selectBestVoice();
+  if(!selectedVoice && synth.onvoiceschanged!==undefined){
+    synth.onvoiceschanged=()=>{ selectedVoice=selectBestVoice(); };
+  }
+}
+
+function stopVoice(){
+  voiceRunning=false;
+  if(silenceRaf){ cancelAnimationFrame(silenceRaf); silenceRaf=null; }
+  if(mediaRecorder&&mediaRecorder.state!=='inactive'){ try{ mediaRecorder.stop(); }catch(e){} mediaRecorder=null; }
+  if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
+  if(audioCtx&&audioCtx.state!=='closed'){ audioCtx.close(); audioCtx=null; }
+  if(synth) synth.cancel();
+  if(livekitRoom){ try{ livekitRoom.disconnect(); }catch(e){} livekitRoom=null; }
+}
+
+async function startVoiceInterview(cand){
+  S.voiceStatus='connecting'; voiceRunning=true; voiceTurns=[];
+  renderVoiceLayout();
+
+  // Connect LiveKit room (transport layer) if credentials provided
+  if(S.keys.livekitUrl && S.keys.livekitApiKey && S.keys.livekitApiSecret){
+    try{
+      const tk = await api('/api/livekit-token',{
+        apiKey:S.keys.livekitApiKey, apiSecret:S.keys.livekitApiSecret,
+        url:S.keys.livekitUrl, room:'interview-'+S.sessionId, identity:cand.name
+      });
+      await loadScript('https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js');
+      if(window.LivekitClient){
+        livekitRoom = new window.LivekitClient.Room();
+        await livekitRoom.connect(tk.url, tk.token);
+      }
+    }catch(e){ console.warn('LiveKit:', e.message); }
+  }
+
+  // Request mic early so browser permission prompt happens before first question
+  try{ await setupMic(); }catch(e){ console.warn('Mic setup:', e.message); }
+
+  S.voiceStatus='starting';
+  updateVoiceStatus('Starting…');
+  try{
+    const d = await api('/api/interview',{sessionId:S.sessionId,candidate:cand.candidate});
+    S.voiceQuestion=d.reply; S.insight=d.insight;
+    voiceTurns.push({q:d.reply});
+    renderVoiceLayout();
+    await speakText(d.reply);
+    startListening();
+  }catch(e){
+    S.voiceStatus='error';
+    S.voiceQuestion='Could not start: '+e.message;
+    renderVoiceLayout();
+  }
+}
+
+function loadScript(src){
+  return new Promise((resolve,reject)=>{
+    if(document.querySelector(`script[src="${src}"]`)){ resolve(); return; }
+    const s=document.createElement('script');
+    s.src=src; s.onload=resolve; s.onerror=reject;
+    document.head.appendChild(s);
+  });
+}
+
+// ── Microphone setup: request with gain boost via Web Audio API ──
+async function setupMic(){
+  if(micStream) return; // already open
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio:{
+      echoCancellation:true,
+      noiseSuppression:true,
+      autoGainControl:true,  // browser-level AGC helps low voices
+      sampleRate:16000,
+      channelCount:1,
+    }
+  });
+  audioCtx = new AudioContext({sampleRate:16000});
+  const source = audioCtx.createMediaStreamSource(micStream);
+  const gain = audioCtx.createGain();
+  gain.gain.value = 3.5; // 3.5× boost — lifts quiet voices above noise floor
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  source.connect(gain);
+  gain.connect(analyser);
+  // Boosted stream for recording
+  const dest = audioCtx.createMediaStreamDestination();
+  gain.connect(dest);
+  micStream._boosted = dest.stream;
+  micStream._analyser = analyser;
+}
+
+// ── VU meter — updates the level bar while listening ──
+function startVuMeter(analyser){
+  const buf = new Uint8Array(analyser.frequencyBinCount);
+  function tick(){
+    if(!voiceRunning){ updateVuLevel(0); return; }
+    analyser.getByteFrequencyData(buf);
+    const avg = buf.reduce((a,b)=>a+b,0)/buf.length;
+    updateVuLevel(avg/128); // 0-1
+    silenceRaf=requestAnimationFrame(tick);
+  }
+  silenceRaf=requestAnimationFrame(tick);
+}
+
+function updateVuLevel(v){
+  const bar=document.getElementById('vu-bar');
+  if(bar) bar.style.width=Math.min(100,v*200)+'%';
+}
+
+// ── Record audio until silence, then transcribe with Groq Whisper ──
+async function startListening(){
+  if(!voiceRunning) return;
+
+  try{ await setupMic(); }catch(e){
+    S.voiceTranscript='Microphone access denied. Please allow mic and click retry.';
+    S.voiceStatus='error'; renderVoiceLayout(); return;
+  }
+
+  S.voiceStatus='listening'; S.voiceTranscript='';
+  updateVoiceStatus('Listening — speak now…');
+  updateVoiceTranscript('');
+
+  const analyser=micStream._analyser;
+  const boosted=micStream._boosted;
+  if(analyser) startVuMeter(analyser);
+
+  const chunks=[];
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+    ? 'audio/webm;codecs=opus'
+    : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
+
+  mediaRecorder = new MediaRecorder(boosted||micStream, {mimeType, audioBitsPerSecond:64000});
+  mediaRecorder.ondataavailable=e=>{ if(e.data.size>0) chunks.push(e.data); };
+  mediaRecorder.start(100); // collect in 100ms chunks
+
+  // Silence detection: stop recording when quiet for 2s (after at least 1s of speech)
+  let speechSeen=false, silenceStart=null;
+  const silenceBuf=new Uint8Array(analyser?.frequencyBinCount||128);
+  const SPEECH_THRESH=8, SILENCE_MS=2000, MIN_SPEECH_MS=800;
+  const recordStart=Date.now();
+
+  await new Promise(resolve=>{
+    function poll(){
+      if(!voiceRunning||!mediaRecorder||mediaRecorder.state==='inactive'){ resolve(); return; }
+      if(analyser){
+        analyser.getByteFrequencyData(silenceBuf);
+        const level=silenceBuf.reduce((a,b)=>a+b,0)/silenceBuf.length;
+        if(level>SPEECH_THRESH){ speechSeen=true; silenceStart=null; }
+        else if(speechSeen){
+          if(!silenceStart) silenceStart=Date.now();
+          else if(Date.now()-silenceStart>SILENCE_MS){ resolve(); return; }
+        }
+      }
+      // hard cap: stop after 45s regardless
+      if(Date.now()-recordStart>45000){ resolve(); return; }
+      silenceRaf=requestAnimationFrame(poll);
+    }
+    poll();
+  });
+
+  if(silenceRaf){ cancelAnimationFrame(silenceRaf); silenceRaf=null; }
+  updateVuLevel(0);
+
+  if(!voiceRunning) return;
+
+  // Need at least MIN_SPEECH_MS of speech captured
+  const elapsed=Date.now()-recordStart;
+  if(!speechSeen && elapsed<MIN_SPEECH_MS){
+    // nothing heard — re-listen
+    if(mediaRecorder&&mediaRecorder.state!=='inactive') mediaRecorder.stop();
+    mediaRecorder=null;
+    setTimeout(()=>startListening(),300);
+    return;
+  }
+
+  S.voiceStatus='processing';
+  updateVoiceStatus('Processing…');
+  await new Promise(r=>{ if(mediaRecorder.state!=='inactive'){ mediaRecorder.onstop=r; mediaRecorder.stop(); }else r(); });
+
+  const blob=new Blob(chunks,{type:mimeType});
+  let answer='';
+  try{
+    answer = await transcribeWhisper(blob, mimeType);
+  }catch(err){
+    // Whisper failed — fall back to browser SpeechRecognition
+    console.warn('Whisper failed, using SpeechRecognition fallback:', err.message);
+    answer = await recognizeFallback();
+  }
+
+  if(!answer.trim()){
+    S.voiceTranscript='Could not hear that clearly. Please try again.';
+    updateVoiceTranscript(S.voiceTranscript);
+    setTimeout(()=>startListening(),800);
+    return;
+  }
+
+  S.voiceTranscript=answer;
+  updateVoiceTranscript(answer);
+  S.voiceStatus='sending';
+  updateVoiceStatus('Sending…');
+
+  try{
+    const d=await api('/api/interview',{sessionId:S.sessionId,message:answer});
+    S.voiceQuestion=d.reply; S.insight=d.insight;
+    voiceTurns.push({a:answer,q:d.reply});
+    renderVoiceLayout();
+    if(d.done){
+      S.done=true; S.feedback=d.feedback; voiceRunning=false;
+      await speakFeedback(d.feedback);
+      renderVoiceFeedback(); return;
+    }
+    await speakText(d.reply);
+    startListening();
+  }catch(e){
+    S.voiceStatus='error';
+    S.voiceQuestion='Error: '+e.message;
+    renderVoiceLayout();
+  }
+}
+
+// ── Groq Whisper transcription ──
+async function transcribeWhisper(blob, mimeType){
+  if(!S.keys.groq) throw new Error('no groq key');
+  const ext = mimeType.includes('ogg')?'ogg':'webm';
+  const form=new FormData();
+  form.append('file', new File([blob],'audio.'+ext,{type:mimeType}));
+  form.append('model','whisper-large-v3-turbo');
+  form.append('language','en');
+  form.append('response_format','text');
+  const r=await fetch('https://api.groq.com/openai/v1/audio/transcriptions',{
+    method:'POST',
+    headers:{Authorization:'Bearer '+S.keys.groq},
+    body:form,
+  });
+  if(!r.ok){ const t=await r.text(); throw new Error(t); }
+  return (await r.text()).trim();
+}
+
+// ── Browser SpeechRecognition fallback ──
+function recognizeFallback(){
+  return new Promise(resolve=>{
+    const SpeechRec=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!SpeechRec){ resolve(''); return; }
+    const rec=new SpeechRec();
+    rec.lang='en-US'; rec.interimResults=false; rec.maxAlternatives=1;
+    let heard='';
+    rec.onresult=e=>{ heard=e.results[0][0].transcript; };
+    rec.onend=()=>resolve(heard);
+    rec.onerror=()=>resolve(heard);
+    rec.start();
+  });
+}
+
+// ── TTS: natural, human-like voice ──
+function speakText(text){
+  return new Promise(resolve=>{
+    if(!synth){ resolve(); return; }
+    synth.cancel();
+    S.voiceStatus='speaking';
+    updateVoiceStatus('Interviewer speaking…');
+    renderMicBtn();
+
+    // Split at sentence boundaries so pauses feel natural
+    const sentences = text.match(/[^.!?]+[.!?]+[\s]*/g) || [text];
+    let i=0;
+    function next(){
+      if(i>=sentences.length||!voiceRunning){ S.voiceStatus='idle'; renderMicBtn(); resolve(); return; }
+      const utt=new SpeechSynthesisUtterance(sentences[i++].trim());
+      utt.voice = selectedVoice || selectBestVoice();
+      utt.lang='en-US';
+      utt.rate=0.88;    // slightly slower = more human
+      utt.pitch=1.0;
+      utt.volume=1.0;
+      utt.onend=next;
+      utt.onerror=next;
+      synth.speak(utt);
+    }
+    next();
+  });
+}
+
+// Lightweight re-render of just the mic button state (avoids full layout rebuild)
+function renderMicBtn(){
+  const btn=document.getElementById('mic-btn');
+  const lbl=document.getElementById('voice-status-label');
+  if(!btn) return;
+  const isListening=S.voiceStatus==='listening';
+  const isSpeaking=S.voiceStatus==='speaking';
+  btn.className=isListening?'mic-btn listening':isSpeaking?'mic-btn speaking':'mic-btn';
+  btn.textContent=isListening?'🔴':isSpeaking?'🔊':'🎙️';
+  if(lbl) lbl.textContent=isListening?'Listening — speak now…':isSpeaking?'Interviewer speaking…':
+    S.voiceStatus==='processing'?'Processing…':S.voiceStatus==='sending'?'Sending…':'Tap to speak';
+}
+
+async function speakFeedback(fb){
+  if(!fb) return;
+  const parts=[
+    'Interview complete. '+fb.summary,
+    'Your strengths: '+fb.strengths.join('. ')+'.',
+    'Areas to work on: '+fb.gaps.join('. ')+'.',
+    'Next steps: '+fb.next.join('. ')+'.',
+  ];
+  for(const p of parts){ await speakText(p); await new Promise(r=>setTimeout(r,400)); }
+}
+
+function updateVoiceStatus(msg){
+  const el=document.getElementById('voice-status-label');
+  if(el) el.textContent=msg;
+  renderMicBtn();
+}
+function updateVoiceTranscript(text){
+  const el=document.getElementById('voice-transcript');
+  if(el) el.textContent=text||'Say your answer…';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RENDER VOICE LAYOUT
+// ─────────────────────────────────────────────────────────────────────────────
+function renderVoiceLayout(){
+  const pg=document.getElementById('pg-interview');
+  const existingHeader=pg.querySelector('header');
+  if(existingHeader) existingHeader.remove();
+  renderInterviewHeader();
+
+  const ivBody=document.getElementById('iv-body');
+  const side=document.getElementById('side');
+  side.style.display='none';
+  const oldChat=document.getElementById('chat');
+  if(oldChat) oldChat.remove();
+  const oldVoice=document.getElementById('voice-col');
+  if(oldVoice) oldVoice.remove();
+
+  const total=S.total;
+  const ins=S.insight||{};
+  const answered=ins.questionsAsked||voiceTurns.filter(t=>t.a).length;
+  const steps=Array.from({length:total},(_,i)=>{
+    const cls=i<answered?'on':(i===answered&&!S.done?'now':'');
+    return `<span class="voice-step ${cls}"></span>`;
+  }).join('');
+
+  const isListening=S.voiceStatus==='listening';
+  const isSpeaking=S.voiceStatus==='speaking';
+  const micClass=isListening?'mic-btn listening':isSpeaking?'mic-btn speaking':'mic-btn';
+  const micLabel=isListening?'Listening…':isSpeaking?'Speaking…':S.voiceStatus==='connecting'?'Connecting…':'Tap to speak';
+
+  const voiceCol=document.createElement('section');
+  voiceCol.className='col'; voiceCol.id='voice-col';
+  voiceCol.style.cssText='background:var(--bg);display:flex;flex-direction:column';
+  voiceCol.innerHTML=`
+    <div class="voice-ui">
+      <div class="voice-steps">${steps}</div>
+      <div class="voice-question">
+        <div class="label">Interviewer</div>
+        <div class="text" id="voice-question-text">${esc(S.voiceQuestion||'Starting interview…')}</div>
+      </div>
+      <div class="voice-transcript" id="voice-transcript">${esc(S.voiceTranscript)||'Say your answer…'}</div>
+      <div class="mic-wrap">
+        <button class="${micClass}" id="mic-btn" title="${isListening?'Listening':'Click to speak'}">
+          ${isListening?'🔴':isSpeaking?'🔊':'🎙️'}
+        </button>
+        <div style="width:160px;height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin:0 auto">
+          <div id="vu-bar" style="height:4px;background:var(--accent);width:0%;border-radius:2px;transition:width .05s"></div>
+        </div>
+        <div class="mic-status" id="voice-status-label">${isListening?'Listening…':isSpeaking?'Interviewer speaking…':'Tap to speak'}</div>
+      </div>
+    </div>`;
+  ivBody.insertBefore(voiceCol, side);
+
+  const micBtn=voiceCol.querySelector('#mic-btn');
+  micBtn.onclick=()=>{
+    if(S.voiceStatus==='speaking'){ synth.cancel(); S.voiceStatus='idle'; renderMicBtn(); }
+    else if(S.voiceStatus==='listening'){
+      // stop recording early — silence detection will trigger
+      if(mediaRecorder&&mediaRecorder.state!=='inactive') mediaRecorder.stop();
+    } else if(S.voiceStatus==='error'||S.voiceStatus==='idle'){
+      voiceRunning=true; startListening();
+    }
+  };
+}
+
+function renderVoiceFeedback(){
+  const ivBody=document.getElementById('iv-body');
+  const oldVoice=document.getElementById('voice-col');
+  if(oldVoice) oldVoice.remove();
+
+  const f=S.feedback;
+  const col=document.createElement('section');
+  col.className='col'; col.id='voice-col';
+  col.style.cssText='background:var(--bg);overflow-y:auto;padding:40px 24px';
+  col.innerHTML=`
+    <div style="max-width:600px;margin:0 auto">
+      <div class="voice-feedback">
+        <h2>Interview Complete</h2>
+        <p class="summary">${esc(f.summary)}</p>
+        <div class="fb-section">
+          <h3>Strengths</h3>
+          ${f.strengths.map(x=>`<div class="fb-item" style="border-left-color:var(--good)">${esc(x)}</div>`).join('')}
+        </div>
+        <div class="fb-section">
+          <h3>Gaps</h3>
+          ${f.gaps.map(x=>`<div class="fb-item" style="border-left-color:var(--bad)">${esc(x)}</div>`).join('')}
+        </div>
+        <div class="fb-section">
+          <h3>Next Steps</h3>
+          ${f.next.map(x=>`<div class="fb-item">${esc(x)}</div>`).join('')}
+        </div>
+        <button class="primary" style="margin-top:24px" id="voice-again-btn">Interview someone else</button>
+      </div>
+    </div>`;
+  const side=document.getElementById('side');
+  ivBody.insertBefore(col,side);
+  document.getElementById('voice-again-btn').onclick=resetInterview;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WIRING
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Welcome
+document.getElementById('welcome-start').onclick=()=>gotoPage('mode');
+
+// Mode
+document.getElementById('mode-back').onclick=()=>gotoPage('welcome');
+
+document.getElementById('choose-chat').onclick=()=>{
+  S.mode='chat';
+  openModal('modal-chat');
+};
+document.getElementById('choose-voice').onclick=()=>{
+  S.mode='voice';
+  openModal('modal-voice');
+};
+
+// Chat modal
+document.getElementById('chat-modal-cancel').onclick=()=>closeModal('modal-chat');
+document.getElementById('chat-modal-start').onclick=()=>{
+  S.keys.groq=document.getElementById('chat-groq-key').value.trim();
+  closeModal('modal-chat');
+  gotoPage('roster');
+  paintRoster();
+  setTimeout(()=>document.getElementById('roster-filter')?.focus(),100);
+};
+// click backdrop to close
+document.getElementById('modal-chat').onclick=e=>{ if(e.target.id==='modal-chat') closeModal('modal-chat'); };
+
+// Voice modal
+document.getElementById('voice-modal-cancel').onclick=()=>closeModal('modal-voice');
+document.getElementById('voice-modal-start').onclick=()=>{
+  S.keys.groq=document.getElementById('voice-groq-key').value.trim();
+  S.keys.livekitUrl=document.getElementById('voice-lk-url').value.trim();
+  S.keys.livekitApiKey=document.getElementById('voice-lk-apikey').value.trim();
+  S.keys.livekitApiSecret=document.getElementById('voice-lk-secret').value.trim();
+  closeModal('modal-voice');
+  gotoPage('roster');
+  paintRoster();
+};
+document.getElementById('modal-voice').onclick=e=>{ if(e.target.id==='modal-voice') closeModal('modal-voice'); };
+
+// Roster filter
+document.getElementById('roster-filter').oninput=paintRoster;
+
+// Mode badge in roster
+function updateRosterBadge(){
+  const b=document.getElementById('roster-mode-badge'); if(!b) return;
+  b.innerHTML=`<span class="mode-badge">${S.mode==='voice'?'🎙️ Voice':'💬 Chat'} Interview</span>`;
+}
+
+// Override gotoPage to handle roster badge
+const _origGotoPage=gotoPage;
+window.gotoPage=function(name){
+  _origGotoPage(name);
+  if(name==='roster') updateRosterBadge();
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// START
+// ─────────────────────────────────────────────────────────────────────────────
 boot();
 </script>
 </body>
