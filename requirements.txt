@@ -1,0 +1,22 @@
+# Core
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+
+# LangChain + provider
+langchain
+langchain-core
+langchain-community
+langchain-groq
+
+# Tests
+pytest
+httpx
+
+# Optional — semantic retrieval. The agentic-RAG path (app/knowledge.py) uses
+# lexical search over 31 short documents and needs neither of these. Install
+# only if you switch to embedding-based retrieval.
+# faiss-cpu
+# sentence-transformers
+# langchain-huggingface
