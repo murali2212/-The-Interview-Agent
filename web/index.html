@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ABTalks Interview Agent</title>
+<style>
+  :root{
+    --bg:#0a0b0d; --panel:#101217; --panel2:#14171d; --line:#23272f; --soft:#1a1d23;
+    --text:#e6e8ec; --dim:#8b929e; --dimmer:#5d636e;
+    --accent:#6ea8fe; --good:#4ec9a0; --warn:#e0b654; --bad:#e0705f;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+  button{font:inherit;color:inherit;background:none;border:1px solid var(--line);border-radius:4px;padding:7px 13px;cursor:pointer;transition:border-color .12s,background .12s}
+  button:hover:not(:disabled){border-color:var(--dim);background:var(--panel2)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#06080c;font-weight:600}
+  button.primary:hover:not(:disabled){background:#8bbcff;border-color:#8bbcff}
+  button.ghost{border-color:transparent;color:var(--dim);padding:5px 9px}
+  button.ghost:hover{color:var(--text)}
+  .mono{font-family:var(--mono)} .dim{color:var(--dim)} .dimmer{color:var(--dimmer)}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:#20242c;border-radius:5px}
+  ::-webkit-scrollbar-thumb:hover{background:#2c313b}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  /* ---------- header ---------- */
+  header{display:flex;align-items:center;gap:14px;padding:11px 20px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap;position:relative}
+  .brand{font-weight:600;letter-spacing:.16em;text-transform:uppercase;font-size:11.5px;white-space:nowrap}
+  .pill{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;padding:2px 7px;border:1px solid var(--line);border-radius:3px;color:var(--dim);white-space:nowrap}
+  .pill.live{color:var(--good);border-color:#26493c}
+  .pill.off{color:var(--warn);border-color:#4a3f22}
+  .spacer{flex:1}
+  .progress{position:absolute;left:0;bottom:-1px;height:2px;background:var(--accent);transition:width .45s cubic-bezier(.4,0,.2,1)}
+  .steps{display:flex;gap:3px;align-items:center}
+  .step{width:15px;height:3px;border-radius:2px;background:var(--line);transition:background .3s}
+  .step.on{background:var(--accent)}
+  .step.now{background:var(--accent);box-shadow:0 0 0 2px rgba(110,168,254,.22)}
+
+  /* ---------- layout ---------- */
+  .grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:1px;background:var(--soft);height:calc(100vh - 47px)}
+  /* No scroll-behavior:smooth here. Restoring scrollTop after a re-render must
+     be instant: an animated restore emits its own scroll events, which the
+     stick-to-bottom detector reads as the user scrolling away. Smooth motion is
+     opted into per call (scrollIntoView) where it is actually wanted. */
+  .col{background:var(--bg);overflow-y:auto;overscroll-behavior:contain}
+  #chat{display:flex;flex-direction:column;padding:20px 24px 0}
+  #side{padding:18px 18px 40px}
+  .col h2{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--dimmer);margin:0 0 12px;font-weight:600}
+  @media(max-width:900px){
+    .grid{grid-template-columns:1fr;height:auto}
+    .col{max-height:none;overflow:visible}
+    #side{border-top:1px solid var(--line)}
+  }
+
+  /* ---------- picker ---------- */
+  .picker{max-width:860px;margin:0 auto;padding:44px 22px 60px}
+  .picker h1{font-size:26px;margin:0 0 10px;letter-spacing:-.01em}
+  .lede{color:var(--dim);max-width:620px;margin-bottom:22px}
+  .filter{width:100%;max-width:340px;background:var(--panel);border:1px solid var(--line);border-radius:4px;color:var(--text);padding:8px 11px;font:13px var(--sans);margin-bottom:16px}
+  .filter:focus{outline:none;border-color:var(--accent)}
+  .cand{display:flex;justify-content:space-between;align-items:center;gap:16px;border:1px solid var(--line);border-radius:5px;padding:13px 15px;margin-bottom:7px;background:var(--panel);transition:border-color .12s,transform .12s}
+  .cand:hover{border-color:var(--dim);transform:translateX(2px)}
+  .cand .who{font-weight:600}
+  .cand .role{color:var(--dimmer);font-weight:400}
+  .stats{display:flex;gap:14px;margin-top:6px;font-family:var(--mono);font-size:10.5px;color:var(--dimmer);align-items:center;flex-wrap:wrap}
+  .ratio{display:flex;align-items:center;gap:6px}
+  .rbar{width:46px;height:3px;background:var(--line);border-radius:2px;overflow:hidden}
+  .rfill{height:3px}
+  .tag{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;padding:1px 5px;border-radius:2px;border:1px solid}
+
+  /* ---------- chat ---------- */
+  .msg{margin-bottom:16px;max-width:80%;animation:rise .28s ease-out}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .msg.them{margin-right:auto}
+  .msg.me{margin-left:auto}
+  .bubble{padding:11px 14px;border-radius:5px;white-space:pre-wrap;word-wrap:break-word}
+  .them .bubble{background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--accent)}
+  .me .bubble{background:#16202e;border:1px solid #24344a}
+  .qmeta{display:flex;gap:8px;flex-wrap:wrap;font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--dimmer);margin-bottom:5px;align-items:center}
+  .kind{color:var(--accent)}
+  .follows{color:var(--accent);cursor:pointer;text-decoration:underline dotted}
+  .why{font-style:italic;color:var(--dimmer);font-size:12px;margin-top:6px;line-height:1.45}
+  .scorecard{max-width:80%;margin:-8px 0 16px;padding:8px 12px;border:1px dashed var(--line);border-radius:5px;background:#0d0f13}
+  .meters{display:flex;gap:16px;flex-wrap:wrap}
+  .meter{font-family:var(--mono);font-size:9.5px;color:var(--dimmer)}
+  .track{width:60px;height:3px;background:var(--line);margin-top:3px;border-radius:2px;overflow:hidden}
+  .fill{height:3px;transition:width .5s ease-out}
+  .flash{animation:flash 1.1s ease-out}
+  @keyframes flash{0%{border-color:var(--accent)}100%{border-color:var(--line)}}
+
+  .thinking{display:flex;gap:5px;align-items:center;color:var(--dimmer);font-style:italic;font-size:12.5px;margin-bottom:16px}
+  .dot{width:5px;height:5px;border-radius:50%;background:var(--dim);animation:pulse 1.3s infinite}
+  .dot:nth-child(2){animation-delay:.18s}.dot:nth-child(3){animation-delay:.36s}
+  @keyframes pulse{0%,60%,100%{opacity:.25}30%{opacity:1}}
+
+  .composer{position:sticky;bottom:0;background:linear-gradient(transparent,var(--bg) 18%);padding:14px 0 18px;margin-top:auto}
+  .cbox{display:flex;gap:8px;align-items:flex-end}
+  textarea{flex:1;font:14px/1.5 var(--sans);background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:5px;padding:11px 13px;resize:none;min-height:46px;max-height:190px;overflow-y:auto}
+  textarea:focus{outline:none;border-color:var(--accent)}
+  .hint{font-family:var(--mono);font-size:9.5px;color:var(--dimmer);margin-top:6px;letter-spacing:.05em}
+
+  /* ---------- side ---------- */
+  .claim{margin-bottom:11px}
+  .claim .top{display:flex;justify-content:space-between;gap:8px;font-size:12px}
+  .belief{position:relative;height:4px;background:var(--line);margin-top:4px;border-radius:2px}
+  .bar{height:4px;border-radius:2px;transition:width .5s ease-out}
+  .prior{position:absolute;top:-3px;width:1px;height:10px;background:var(--dim)}
+  .sub{font-family:var(--mono);font-size:9px;color:var(--dimmer);margin-top:2px;text-transform:uppercase;letter-spacing:.05em}
+  .modrow{display:flex;gap:2px;margin-bottom:4px}
+  .modlab{font-family:var(--mono);font-size:8.5px;color:var(--dimmer);width:14px;flex:none;padding-top:2px}
+  .cells{display:flex;gap:2px;flex:1}
+  .cell{flex:1;height:11px;border:1px solid var(--soft);border-radius:1px}
+  .cell.hit{background:var(--accent);border-color:var(--accent)}
+  .trace li{list-style:none;padding:6px 0 6px 10px;border-left:2px solid var(--line);margin-bottom:2px;animation:rise .25s ease-out}
+  .trace .ag{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+  .trace .dt{font-size:11.5px;color:var(--dim);margin-top:2px;line-height:1.4}
+  ul.trace{margin:0;padding:0}
+
+  /* ---------- report ---------- */
+  .report{border-top:1px solid var(--line);margin-top:20px;padding-top:20px;animation:rise .4s ease-out}
+  .verdict{display:flex;gap:26px;flex-wrap:wrap;margin:14px 0 20px;font-family:var(--mono);font-size:11px;color:var(--dimmer)}
+  .verdict b{display:block;font-size:20px;color:var(--text);margin-top:3px}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{text-align:left;font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--dimmer);padding:5px 7px;border-bottom:1px solid var(--line);font-weight:500}
+  td{padding:5px 7px;border-bottom:1px solid var(--soft)}
+  td.n{font-family:var(--mono);color:var(--dim)}
+  .tw{overflow-x:auto}
+  .item{padding:7px 0 7px 11px;border-left:2px solid var(--line);margin-bottom:6px;font-size:13px}
+  h3{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--dimmer);margin:22px 0 9px}
+  .err{border:1px solid #5a2b28;background:#1c1211;color:#e0a89f;padding:10px 13px;border-radius:4px;margin-bottom:14px}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+const $ = (h) => { const t=document.createElement('template'); t.innerHTML=h.trim(); return t.content.firstChild; };
+const esc = (s) => String(s??'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const col = (v) => v>=.65?'var(--good)':v>=.4?'var(--warn)':'var(--bad)';
+
+const MODULES=[[1,3],[4,6],[7,10],[11,15],[16,20],[21,24],[25,28],[29,31]];
+
+const state = {
+  sessionId:null, candidate:null, messages:[], insight:null, done:false,
+  feedback:null, busy:false, error:null, engine:null, roster:[], total:8,
+  filter:'', draft:''
+};
+
+// Scroll bookkeeping. render() rebuilds the DOM, which resets scrollTop to 0
+// and snaps the transcript back to question one. We restore it every time, and
+// stick to the bottom whenever the conversation has actually moved on.
+let stick = true, chatTop = 0, sideTop = 0;
+//: Set while we move the scrollbar ourselves, so our own restore is not
+//: mistaken for the reader scrolling away from the newest message.
+let ignoreScroll = false;
+
+async function api(path, body){
+  const opt = body ? {method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)} : {};
+  const r = await fetch(path, opt);
+  const d = await r.json();
+  if(!r.ok) throw new Error(d.error || ('HTTP '+r.status));
+  return d;
+}
+
+async function boot(){
+  try{
+    const [h, c] = await Promise.all([api('/api/health'), api('/api/candidates')]);
+    state.engine = h.llm; state.roster = c.candidates;
+    state.total = (h.interview && h.interview.max_questions) || 8;
+  }catch(e){ state.error = String(e); }
+  render();
+}
+
+async function start(cand){
+  state.busy=true; state.error=null; state.candidate=cand;
+  state.sessionId = 'sess-' + Math.random().toString(36).slice(2,10);
+  state.messages=[]; state.done=false; state.feedback=null; state.insight=null; state.draft='';
+  stick=true; chatTop=0; sideTop=0;
+  render();
+  try{
+    const d = await api('/api/interview', { sessionId: state.sessionId, candidate: cand.candidate });
+    state.messages.push({who:'them', text:d.reply});
+    state.insight = d.insight;
+  }catch(e){ state.error = String(e); }
+  state.busy=false; render();
+}
+
+async function send(text){
+  if(!text.trim() || state.busy || state.done) return;
+  state.messages.push({who:'me', text}); state.busy=true; state.draft=''; stick=true;
+  render();
+  try{
+    const d = await api('/api/interview', { sessionId: state.sessionId, message: text });
+    state.messages.push({who:'them', text:d.reply});
+    state.insight = d.insight;
+    if(d.done){ state.done=true; state.feedback=d.feedback; }
+  }catch(e){ state.error = String(e); }
+  state.busy=false; stick=true; render();
+}
+
+function reset(){
+  state.sessionId=null; state.messages=[]; state.insight=null;
+  state.done=false; state.feedback=null; state.error=null; state.draft='';
+  render();
+}
+
+function turnFor(i){
+  const t = state.insight?.transcript || [];
+  const idx = state.messages.slice(0,i+1).filter(m=>m.who==='them').length - 1;
+  return t[idx] || null;
+}
+
+function fmtRatio(c){
+  return c.missionsCompleted ? c.missionsFirstTry / c.missionsCompleted : 0;
+}
+
+/* ---------------------------------------------------------------- render */
+
+function render(){
+  const root = document.getElementById('root');
+  root.innerHTML = '';
+  if(!state.sessionId){ renderPicker(root); return; }
+  renderInterview(root);
+}
+
+function renderPicker(root){
+  const eng = state.engine ? (state.engine.live
+    ? `<span class="pill live">${esc(state.engine.main_model)}</span>`
+    : `<span class="pill off">offline deterministic</span>`) : '';
+
+  root.appendChild($(`<div class="picker">
+    <h1>ABTalks Interview Agent</h1>
+    <p class="lede">The panel reads a candidate's cohort record, forms explicit beliefs about what they
+    understand, then spends ${state.total} questions testing them. It reports what it believed before,
+    what it believes now, and which answer changed its mind. ${eng}</p>
+    ${state.error?`<div class="err">${esc(state.error)}</div>`:''}
+    <input class="filter" placeholder="Filter by name or role…" />
+    <div id="roster"></div>
+  </div>`));
+
+  const input = root.querySelector('.filter');
+  input.value = state.filter;
+  input.oninput = (e)=>{ state.filter=e.target.value; paintRoster(); };
+  paintRoster();
+  setTimeout(()=>input.focus(),0);
+}
+
+function paintRoster(){
+  const box = document.getElementById('roster');
+  if(!box) return;
+  box.innerHTML='';
+  const q = state.filter.trim().toLowerCase();
+  const list = (state.roster||[]).filter(c=>
+    !q || c.name.toLowerCase().includes(q) || (c.jobRole||'').toLowerCase().includes(q));
+
+  if(!list.length){ box.appendChild($('<p class="dimmer">No candidate matches that.</p>')); return; }
+
+  list.forEach(c=>{
+    const r = fmtRatio(c);
+    // Two candidates can both finish 31 missions — one first-time, one after
+    // five attempts every go. Surfacing that ratio is the single most useful
+    // thing this list can show.
+    const tag = r>=.85 ? `<span class="tag" style="color:var(--good);border-color:#26493c">fluent</span>`
+              : r<=.2  ? `<span class="tag" style="color:var(--warn);border-color:#4a3f22">grinder</span>`
+              : c.missionsCompleted<20 ? `<span class="tag" style="color:var(--dim);border-color:var(--line)">sparse</span>` : '';
+    const el = $(`<div class="cand">
+      <div style="min-width:0">
+        <div><span class="who">${esc(c.name)}</span>
+          <span class="role">${esc(c.jobRole)} · ${c.yearsExperience}y</span> ${tag}</div>
+        <div class="stats">
+          <span>${c.missionsCompleted}/31 missions</span>
+          <span class="ratio">first-try
+            <span class="rbar"><span class="rfill" style="width:${(r*100).toFixed(0)}%;background:${col(r)}"></span></span>
+            ${c.missionsFirstTry}
+          </span>
+          <span>${c.commitDays} commit days</span>
+        </div>
+      </div>
+      <button class="primary">Interview</button></div>`);
+    el.querySelector('button').onclick = ()=>start(c);
+    box.appendChild(el);
+  });
+}
+
+function renderInterview(root){
+  const ins = state.insight || {};
+  const asked = (ins.transcript||[]).length || state.messages.filter(m=>m.who==='them').length;
+  const answered = ins.questionsAsked || 0;
+  const total = state.total;
+
+  const steps = Array.from({length:total},(_,i)=>{
+    const cls = i < answered ? 'on' : (i === answered && !state.done ? 'now' : '');
+    return `<span class="step ${cls}"></span>`;
+  }).join('');
+
+  const head = $(`<header>
+    <span class="brand">ABTalks Interview</span>
+    <span class="pill">${esc(state.candidate?.name||'')}</span>
+    <div class="steps" title="${answered} of ${total} answered">${steps}</div>
+    <span class="mono dimmer" style="font-size:11px">${state.done?'complete':`question ${Math.min(asked,total)} of ${total}`}</span>
+    <span class="spacer"></span>
+    <span class="pill">${(ins.daysCovered||[]).length} days</span>
+    ${state.engine? (state.engine.live?`<span class="pill live">groq</span>`:`<span class="pill off">offline</span>`):''}
+    <button class="ghost" id="newiv">New interview</button>
+    <div class="progress" style="width:${(answered/total*100).toFixed(1)}%"></div>
+  </header>`);
+  root.appendChild(head);
+  head.querySelector('#newiv').onclick = reset;
+
+  const grid = $(`<div class="grid"><section class="col" id="chat"></section><section class="col" id="side"></section></div>`);
+  root.appendChild(grid);
+  const chat = grid.querySelector('#chat');
+  const side = grid.querySelector('#side');
+
+  if(state.error) chat.appendChild($(`<div class="err">${esc(state.error)}</div>`));
+
+  state.messages.forEach((m,i)=>{
+    if(m.who==='me'){
+      chat.appendChild($(`<div class="msg me"><div class="bubble">${esc(m.text)}</div></div>`));
+      return;
+    }
+    const t = turnFor(i);
+    const meta = t ? `<div class="qmeta"><span>Q${t.n}</span><span class="kind">${esc(t.kind)}</span>
+      <span>day ${t.day}</span><span>${esc(t.concept)}</span>
+      ${t.derivedFrom?`<span class="follows" data-q="${t.derivedFrom}">follows Q${t.derivedFrom}</span>`:''}</div>` : '';
+    const why = t && t.rationale ? `<div class="why">why this question now: ${esc(t.rationale)}</div>` : '';
+    const el = $(`<div class="msg them" data-q="${t?t.n:''}">${meta}<div class="bubble">${esc(m.text)}</div>${why}</div>`);
+    chat.appendChild(el);
+
+    if(t && t.scores){
+      const mt = ['correctness','depth','specificity'].map(k=>
+        `<div class="meter">${k} ${t.scores[k].toFixed(2)}<div class="track"><div class="fill" style="width:${t.scores[k]*100}%;background:${col(t.scores[k])}"></div></div></div>`).join('');
+      chat.appendChild($(`<div class="scorecard"><div class="meters">${mt}</div>
+        <div class="why" style="margin-top:6px">${esc(t.scores.note)}</div></div>`));
+    }
+  });
+
+  // jump-to-source for follow-ups
+  chat.querySelectorAll('.follows').forEach(el=>{
+    el.onclick = ()=>{
+      const target = chat.querySelector(`.msg.them[data-q="${el.dataset.q}"]`);
+      if(target){ stick=false; target.scrollIntoView({behavior:'smooth',block:'center'});
+        target.classList.add('flash'); setTimeout(()=>target.classList.remove('flash'),1200); }
+    };
+  });
+
+  if(state.busy){
+    chat.appendChild($(`<div class="thinking"><span class="dot"></span><span class="dot"></span><span class="dot"></span> the panel is thinking</div>`));
+  }
+
+  if(state.done && state.feedback) chat.appendChild(reportEl(ins));
+  else chat.appendChild(composerEl());
+
+  paintSide(side, ins);
+
+  // Restore scroll AFTER layout, otherwise the browser has nothing to scroll.
+  requestAnimationFrame(()=>{
+    // Below 900px the layout stacks and the PAGE scrolls instead of the
+    // column, so the transcript position lives on window. Handling only the
+    // column would leave the same jump-to-Q1 bug on a narrow window.
+    const columnScrolls = chat.scrollHeight > chat.clientHeight + 4;
+    const scroller = {
+      get top(){ return columnScrolls ? chat.scrollTop : window.scrollY; },
+      set top(v){ columnScrolls ? (chat.scrollTop = v) : window.scrollTo(0, v); },
+      get max(){ return columnScrolls ? chat.scrollHeight : document.body.scrollHeight; },
+      get view(){ return columnScrolls ? chat.clientHeight : window.innerHeight; },
+    };
+
+    ignoreScroll = true;
+    side.scrollTop = sideTop;
+    scroller.top = stick ? scroller.max : chatTop;
+    chatTop = scroller.top;
+    // Release on the next frame, once the browser has emitted the scroll
+    // events caused by the assignments above.
+    requestAnimationFrame(()=>{ ignoreScroll = false; });
+
+    const onMove = ()=>{
+      if(ignoreScroll) return;
+      chatTop = scroller.top;
+      // If the reader scrolls up to re-read, stop yanking them to the bottom.
+      stick = scroller.max - scroller.top - scroller.view < 90;
+    };
+    if(columnScrolls){
+      chat.onscroll = onMove;
+      window.onscroll = null;
+    }else{
+      chat.onscroll = null;
+      window.onscroll = onMove;
+    }
+    side.onscroll = ()=>{ if(!ignoreScroll) sideTop = side.scrollTop; };
+  });
+}
+
+function composerEl(){
+  const comp = $(`<div class="composer">
+    <div class="cbox">
+      <textarea placeholder="Answer as the candidate…"></textarea>
+      <button class="primary">Send</button>
+    </div>
+    <div class="hint">Enter to send · Shift+Enter for a new line</div>
+  </div>`);
+  const ta = comp.querySelector('textarea'), btn = comp.querySelector('button');
+  ta.value = state.draft;
+  btn.disabled = state.busy;
+
+  const grow = ()=>{ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,190)+'px'; };
+  const fire = ()=>{ const v=ta.value; if(!v.trim())return; ta.value=''; grow(); send(v); };
+
+  ta.oninput = ()=>{ state.draft=ta.value; grow(); };
+  ta.onkeydown = (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); fire(); } };
+  btn.onclick = fire;
+
+  setTimeout(()=>{ grow(); if(!state.busy) ta.focus(); ta.selectionStart=ta.value.length; },0);
+  return comp;
+}
+
+function paintSide(side, ins){
+  const hit = new Set(ins.daysCovered||[]);
+
+  side.appendChild($('<h2>Coverage</h2>'));
+  const cov = $('<div style="margin-bottom:6px"></div>');
+  MODULES.forEach(([a,b],i)=>{
+    const cells = Array.from({length:b-a+1},(_,k)=>{
+      const d=a+k;
+      return `<div class="cell${hit.has(d)?' hit':''}" title="day ${d}"></div>`;
+    }).join('');
+    cov.appendChild($(`<div class="modrow"><span class="modlab">M${i+1}</span><span class="cells">${cells}</span></div>`));
+  });
+  side.appendChild(cov);
+  const mods = new Set();
+  MODULES.forEach(([a,b],i)=>{ for(const d of hit) if(d>=a&&d<=b) mods.add(i+1); });
+  side.appendChild($(`<div class="mono dimmer" style="font-size:10px;margin-bottom:20px">
+    ${hit.size} days · ${mods.size} modules <span style="color:var(--dimmer)">· floor 4 days / 3 modules</span></div>`));
+
+  side.appendChild($('<h2>Evidence ledger</h2>'));
+  const led = (ins.ledger||[]).slice(0,18);
+  if(!led.length) side.appendChild($('<p class="dimmer" style="font-size:12px">Priors appear once the interview starts.</p>'));
+  led.forEach(c=>{
+    const moved = Math.abs((c.belief??0)-(c.prior??0)) > .02;
+    side.appendChild($(`<div class="claim">
+      <div class="top"><span>${esc(c.concept)}</span>
+        <span class="mono dim">${c.belief.toFixed(2)}${moved?` <span style="color:${c.belief>c.prior?'var(--good)':'var(--bad)'}">${c.belief>c.prior?'↑':'↓'}</span>`:''}</span></div>
+      <div class="belief"><div class="bar" style="width:${c.belief*100}%;background:${col(c.belief)}"></div>
+      <div class="prior" style="left:${c.prior*100}%" title="believed ${c.prior.toFixed(2)} before"></div></div>
+      <div class="sub">day ${c.day} · ${esc(c.status)} · ${esc(c.source)} · ${c.probes} ev</div></div>`));
+  });
+
+  side.appendChild($('<h2 style="margin-top:24px">Agent trace</h2>'));
+  const ul = $('<ul class="trace"></ul>');
+  const colours = {ProfileAnalyst:'#c78ce0',Director:'#6ea8fe',Interviewer:'#7fd6e8',Assessor:'#e0705f',Ledger:'#9aa4b2',ClaimVerifier:'#d99ac0',Feedback:'#8fd66a'};
+  (ins.trace||[]).slice(-40).forEach(e=>{
+    const c = colours[e.agent]||'#8b929e';
+    ul.appendChild($(`<li style="border-left-color:${c}"><span class="ag" style="color:${c}">${esc(e.agent)}</span>
+      <span class="mono dimmer" style="font-size:9.5px"> ${esc(e.action)}</span>
+      <div class="dt">${esc(e.detail)}</div></li>`));
+  });
+  side.appendChild(ul);
+}
+
+function reportEl(ins){
+  const f = state.feedback, cal = ins.calibration||[];
+  const moved = cal.filter(r=>Math.abs(r.delta)>0.02);
+  const over = cal.filter(r=>r.verdict==='overclaimed').length;
+  const el = $(`<div class="report">
+    <h3>Interview complete</h3>
+    <p style="font-size:15px;line-height:1.6">${esc(f.summary)}</p>
+    <div class="verdict">
+      <div>questions<b>${ins.questionsAsked||state.total}</b></div>
+      <div>days covered<b>${(ins.daysCovered||[]).length}</b></div>
+      <div>beliefs moved<b>${moved.length}</b></div>
+      <div>overclaimed<b style="color:${over?'var(--bad)':'var(--text)'}">${over}</b></div>
+    </div>
+    <h3>Strengths</h3>${f.strengths.map(x=>`<div class="item" style="border-left-color:var(--good)">${esc(x)}</div>`).join('')}
+    <h3>Gaps</h3>${f.gaps.map(x=>`<div class="item" style="border-left-color:var(--bad)">${esc(x)}</div>`).join('')}
+    <h3>What to do next</h3>${f.next.map(x=>`<div class="item">${esc(x)}</div>`).join('')}
+    <h3>Calibration — believed before vs. found</h3>
+    <div class="tw"><table><thead><tr><th>day</th><th>topic</th><th>before</th><th></th><th>after</th><th>verdict</th></tr></thead>
+    <tbody>${(moved.length?moved:cal).map(r=>`<tr><td class="n">${r.day}</td><td>${esc(r.concept)}</td>
+      <td class="n">${r.prior.toFixed(2)}</td>
+      <td class="n" style="color:${r.delta>0.02?'var(--good)':r.delta<-0.02?'var(--bad)':'var(--dimmer)'}">${r.delta>0.02?'↑':r.delta<-0.02?'↓':'→'}</td>
+      <td class="n">${r.posterior.toFixed(2)}</td>
+      <td class="mono" style="font-size:10px;color:${r.verdict==='overclaimed'?'var(--bad)':r.verdict==='underrated'?'var(--good)':'var(--dim)'}">${esc(r.verdict)}</td></tr>`).join('')}
+    </tbody></table></div>
+    <div style="margin:22px 0 10px"><button class="primary" id="again">Interview someone else</button></div>
+  </div>`);
+  setTimeout(()=>{ const b=document.getElementById('again'); if(b) b.onclick=reset; },0);
+  return el;
+}
+
+boot();
+</script>
+</body>
+</html>
