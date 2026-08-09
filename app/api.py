@@ -18,6 +18,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel
 
@@ -274,3 +275,14 @@ def livekit_token(req: LiveKitTokenRequest) -> JSONResponse:
     msg = f"{header}.{payload}".encode()
     sig = b64url(hmac.new(req.apiSecret.encode(), msg, hashlib.sha256).digest())
     return JSONResponse({"token": f"{header}.{payload}.{sig}", "url": req.url, "room": req.room})
+
+
+# ---------------------------------------------------------------------------
+# Static assets (config.js, etc.) — local dev / same-host convenience only.
+# When the frontend is deployed separately (Vercel), this backend never
+# serves these files at all; registered last so it never shadows the /api/*
+# and "/" routes above, which FastAPI matches first regardless of mount order.
+# ---------------------------------------------------------------------------
+
+if STATIC.exists():
+    app.mount("/", StaticFiles(directory=STATIC), name="static")

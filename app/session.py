@@ -2,14 +2,13 @@
 
 The spec hands us the `sessionId`; we never mint one. State is logically
 in-process — no database was asked for and a restart losing a live interview
-is acceptable — but *where* "in-process" means something depends on how this
-runs. A local `uvicorn` process lives for the whole interview, so a plain
-dict is correct there. A Vercel serverless deployment has no such guarantee:
-each request can land on a different, short-lived instance, so a plain dict
-would silently lose the session between question 1 and question 2. When
-`KV_REST_API_URL` / `KV_REST_API_TOKEN` are present (Vercel KV, which is
-Upstash Redis under a REST API) the store below persists there instead;
-otherwise it falls back to the original in-process dict unchanged.
+is acceptable — but persisting it is still worth doing when a real database
+is one env var away: it means a backend redeploy or restart mid-interview
+does not silently drop the candidate. When `SUPABASE_URL` /
+`SUPABASE_SERVICE_ROLE_KEY` are present the store below persists to a
+Supabase Postgres table via its PostgREST REST API; otherwise it falls back
+to the original in-process dict unchanged, which is exactly what local
+development and the test suite use.
 
 `history` (raw turns) and `claims` (structured belief) are deliberately
 separate. Message history alone is what makes an "AI interviewer" drift into a
@@ -109,28 +108,47 @@ class Session:
 # ---------------------------------------------------------------------------
 #
 # Two backends behind the same four functions. Pickle (not hand-rolled JSON)
-# is used for the KV path because a Session graph is dataclasses-of-dataclasses
-# with enums and a pydantic Candidate inside it — round-tripping that through
-# JSON correctly means reimplementing pickle badly. We control both the write
-# and the read side of this data (it is never attacker-supplied), so pickle's
-# usual deserialization risk does not apply here.
+# is used for the Supabase path because a Session graph is
+# dataclasses-of-dataclasses with enums and a pydantic Candidate inside it —
+# round-tripping that through JSON correctly means reimplementing pickle
+# badly. We control both the write and the read side of this data (it is
+# never attacker-supplied), so pickle's usual deserialization risk does not
+# apply here. The service-role key bypasses Row Level Security by design —
+# it must only ever live in the backend host's environment, never reach the
+# frontend.
+#
+# Table (run once in the Supabase SQL editor):
+#
+#   create table if not exists sessions (
+#     id text primary key,
+#     payload text not null,
+#     updated_at timestamptz not null default now()
+#   );
+#   create index if not exists sessions_updated_at_idx on sessions (updated_at);
 
 _SESSIONS: dict[str, Session] = {}
 
-_KV_URL = os.getenv("KV_REST_API_URL", "").rstrip("/")
-_KV_TOKEN = os.getenv("KV_REST_API_TOKEN", "").strip()
-_KV_TTL_SECONDS = int(os.getenv("SESSION_TTL_SECONDS", "7200"))  # 2h — an abandoned interview should not live forever
-_KV_PREFIX = "abtalks:session:"
+_SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
+_SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+_SUPABASE_TABLE = "sessions"
 
 
-def _kv_enabled() -> bool:
-    return bool(_KV_URL and _KV_TOKEN)
+def _supabase_enabled() -> bool:
+    return bool(_SUPABASE_URL and _SUPABASE_KEY)
 
 
-def _kv_client():
+def _supabase_client():
     import httpx
 
-    return httpx.Client(base_url=_KV_URL, headers={"Authorization": f"Bearer {_KV_TOKEN}"}, timeout=10.0)
+    return httpx.Client(
+        base_url=f"{_SUPABASE_URL}/rest/v1",
+        headers={
+            "apikey": _SUPABASE_KEY,
+            "Authorization": f"Bearer {_SUPABASE_KEY}",
+            "Content-Type": "application/json",
+        },
+        timeout=10.0,
+    )
 
 
 def _encode(session: Session) -> str:
@@ -142,66 +160,76 @@ def _decode(raw: str) -> Session:
 
 
 def get(session_id: str) -> Session | None:
-    if not _kv_enabled():
+    if not _supabase_enabled():
         return _SESSIONS.get(session_id)
     try:
-        with _kv_client() as c:
-            r = c.get(f"/get/{_KV_PREFIX}{session_id}")
+        with _supabase_client() as c:
+            r = c.get(f"/{_SUPABASE_TABLE}", params={"id": f"eq.{session_id}", "select": "payload"})
             r.raise_for_status()
-            raw = r.json().get("result")
-            return _decode(raw) if raw else None
+            rows = r.json()
+            return _decode(rows[0]["payload"]) if rows else None
     except Exception:
-        log.exception("KV get failed for session %s", session_id)
+        log.exception("Supabase get failed for session %s", session_id)
         return None
 
 
 def put(session: Session) -> Session:
-    if not _kv_enabled():
+    if not _supabase_enabled():
         _SESSIONS[session.id] = session
         return session
     try:
-        with _kv_client() as c:
+        with _supabase_client() as c:
             r = c.post(
-                f"/set/{_KV_PREFIX}{session.id}",
-                params={"EX": _KV_TTL_SECONDS},
-                content=_encode(session),
+                f"/{_SUPABASE_TABLE}",
+                headers={"Prefer": "resolution=merge-duplicates,return=minimal"},
+                json=[{"id": session.id, "payload": _encode(session), "updated_at": _now()}],
             )
             r.raise_for_status()
     except Exception:
-        log.exception("KV put failed for session %s", session.id)
+        log.exception("Supabase put failed for session %s", session.id)
     return session
 
 
 def drop(session_id: str) -> bool:
-    if not _kv_enabled():
+    if not _supabase_enabled():
         return _SESSIONS.pop(session_id, None) is not None
     try:
-        with _kv_client() as c:
-            r = c.post(f"/del/{_KV_PREFIX}{session_id}")
+        with _supabase_client() as c:
+            r = c.delete(
+                f"/{_SUPABASE_TABLE}",
+                params={"id": f"eq.{session_id}"},
+                headers={"Prefer": "return=representation"},
+            )
             r.raise_for_status()
-            return bool(r.json().get("result"))
+            return len(r.json()) > 0
     except Exception:
-        log.exception("KV drop failed for session %s", session_id)
+        log.exception("Supabase drop failed for session %s", session_id)
         return False
 
 
 def count() -> int:
-    """Best-effort. Exact in-process; approximate (whole-DB DBSIZE) under KV,
-    which is fine since this only feeds the informational /api/health field."""
-    if not _kv_enabled():
+    """Exact in-process; exact under Supabase too, via PostgREST's Content-Range
+    count header — no need to fetch rows just to count them."""
+    if not _supabase_enabled():
         return len(_SESSIONS)
     try:
-        with _kv_client() as c:
-            r = c.post("/dbsize")
+        with _supabase_client() as c:
+            r = c.get(
+                f"/{_SUPABASE_TABLE}",
+                params={"select": "id"},
+                headers={"Prefer": "count=exact", "Range": "0-0"},
+            )
             r.raise_for_status()
-            return int(r.json().get("result", 0))
+            content_range = r.headers.get("content-range", "")  # e.g. "0-0/42"
+            return int(content_range.split("/")[-1]) if "/" in content_range else -1
     except Exception:
-        log.exception("KV count failed")
+        log.exception("Supabase count failed")
         return -1
 
 
 def clear() -> None:
     """In-process only — tests and local scripts. Deliberately does not
-    flush the shared KV store in production: this is a per-key store, not a
-    dedicated namespace, and there is no safe indiscriminate wipe here."""
+    touch the Supabase table in production: this is a shared, durable store,
+    not a per-test scratch space, and there is no safe indiscriminate wipe
+    here."""
     _SESSIONS.clear()
