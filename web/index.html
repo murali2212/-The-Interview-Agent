@@ -726,6 +726,7 @@ function initVoices(){
 function stopVoice(){
   voiceRunning=false;
   if(typeof stopRollingTranscription==='function') stopRollingTranscription();
+  if(typeof stopVuMeter==='function') stopVuMeter();
   if(silenceRaf){ cancelAnimationFrame(silenceRaf); silenceRaf=null; }
   if(mediaRecorder&&mediaRecorder.state!=='inactive'){ try{ mediaRecorder.stop(); }catch(e){} mediaRecorder=null; }
   if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
@@ -781,13 +782,17 @@ function loadScript(src){
   });
 }
 
-// ── Microphone setup: request with gain boost via Web Audio API ──
+// ── Microphone setup ──
 //
-// Forcing an exact sampleRate on BOTH getUserMedia and the AudioContext (as
-// this used to do) is a known source of dead/near-silent captures on
-// Windows Chrome when it doesn't match the device's native rate — the graph
-// runs but produces almost nothing. Letting the browser pick its own native
-// rate throughout fixes that; nothing here needs a specific rate.
+// Recording goes straight from getUserMedia to MediaRecorder. Two earlier
+// attempts routed it through a Web Audio gain node and a
+// MediaStreamAudioDestinationNode first; that graph is easy to get subtly
+// wrong (a forced sampleRate mismatch alone is enough to make it carry
+// near-silence on Windows Chrome) and it is not needed — getUserMedia's own
+// autoGainControl already lifts quiet voices, and Whisper is robust to level.
+// The Web Audio side now exists ONLY to measure level for the meter and the
+// silence detector, where a mistake costs a wrong reading rather than a
+// silent interview.
 async function setupMic(){
   if(micStream) return; // already open
   micStream = await navigator.mediaDevices.getUserMedia({
@@ -797,70 +802,65 @@ async function setupMic(){
       autoGainControl:true,  // browser-level AGC helps low voices
     }
   });
+  const track = micStream.getAudioTracks()[0];
+  if(track){
+    console.info('mic:', track.label, 'muted:', track.muted, track.getSettings());
+    if(track.muted) console.warn('Microphone track reports muted — check OS-level mute');
+  }
   audioCtx = new AudioContext();
   if(audioCtx.state==='suspended') await audioCtx.resume(); // Chrome can start contexts suspended even after a user gesture
   const source = audioCtx.createMediaStreamSource(micStream);
-  const gain = audioCtx.createGain();
-  gain.gain.value = 4; // 4× boost — lifts quiet voices above noise floor
   const analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 256;
-  analyser.smoothingTimeConstant = 0.35;
-  source.connect(analyser); // level metering taps the RAW signal, unaffected by gain
-  const boostedAnalyser = audioCtx.createAnalyser();
-  boostedAnalyser.fftSize = 256;
-  source.connect(gain);
-  gain.connect(boostedAnalyser); // sanity-check the boosted path actually carries signal
-  // Boosted stream for recording
-  const dest = audioCtx.createMediaStreamDestination();
-  gain.connect(dest);
-  micStream._boosted = dest.stream;
+  analyser.fftSize = 2048;                 // large enough for stable time-domain reads
+  analyser.smoothingTimeConstant = 0.2;
+  source.connect(analyser);
   micStream._analyser = analyser;
-  micStream._boostedAnalyser = boostedAnalyser;
+}
 
-  // Self-test: if the boosted path is dead (common when a routing step
-  // silently fails) fall back to recording the raw, unboosted mic instead
-  // of shipping silence to Whisper every time.
-  await new Promise(r=>setTimeout(r,250));
-  const testBuf=new Uint8Array(boostedAnalyser.frequencyBinCount);
-  boostedAnalyser.getByteFrequencyData(testBuf);
-  const rawBuf=new Uint8Array(analyser.frequencyBinCount);
-  analyser.getByteFrequencyData(rawBuf);
-  const boostedLevel=testBuf.reduce((a,b)=>a+b,0);
-  const rawLevel=rawBuf.reduce((a,b)=>a+b,0);
-  if(boostedLevel===0 && rawLevel>0){
-    console.warn('Boosted mic path produced no signal — recording raw mic instead');
-    micStream._boosted = null;
-  }
+// True peak amplitude (0–1) from the time domain. getByteFrequencyData
+// averaged across all FFT bins — which this used to use — buries speech:
+// human voice occupies the lowest ~20 of 128 bins, so the mean is dominated
+// by empty high-frequency bins and quiet speech never crosses a threshold.
+function peakLevel(analyser, buf){
+  analyser.getFloatTimeDomainData(buf);
+  let peak = 0;
+  for(let i=0;i<buf.length;i++){ const a=Math.abs(buf[i]); if(a>peak) peak=a; }
+  return peak;
 }
 
 // ── VU meter — updates the level bar while listening ──
+// Owns its own RAF handle: it used to share `silenceRaf` with the silence
+// detector, so whichever loop scheduled last won and cancelling stopped only
+// one of them.
+let vuRaf=null;
 function startVuMeter(analyser){
-  const buf = new Uint8Array(analyser.frequencyBinCount);
+  stopVuMeter();
+  const buf = new Float32Array(analyser.fftSize);
   function tick(){
-    if(!voiceRunning){ updateVuLevel(0); return; }
-    analyser.getByteFrequencyData(buf);
-    const avg = buf.reduce((a,b)=>a+b,0)/buf.length;
-    updateVuLevel(avg/128); // 0-1
-    silenceRaf=requestAnimationFrame(tick);
+    if(!voiceRunning){ updateVuLevel(0); vuRaf=null; return; }
+    updateVuLevel(peakLevel(analyser, buf));
+    vuRaf=requestAnimationFrame(tick);
   }
-  silenceRaf=requestAnimationFrame(tick);
+  vuRaf=requestAnimationFrame(tick);
+}
+function stopVuMeter(){
+  if(vuRaf){ cancelAnimationFrame(vuRaf); vuRaf=null; }
+  updateVuLevel(0);
 }
 
 function updateVuLevel(v){
   const bar=document.getElementById('vu-bar');
-  if(bar) bar.style.width=Math.min(100,v*400)+'%'; // raw (unboosted) signal reads quiet — scale up for visibility
+  if(bar) bar.style.width=Math.min(100,v*300)+'%'; // peak amplitude 0–1, scaled for visibility
 }
 
 // ── Record audio until silence, then transcribe with Groq Whisper ──
 //
-// Earlier this ran a second, separate browser SpeechRecognition mic grab
-// purely to show live captions, alongside the getUserMedia stream doing the
-// actual recording. On Windows, two simultaneous opens of the same physical
-// microphone commonly starve one of them of audio — which is why answers
-// were coming back nearly silent. There is now exactly ONE mic pipeline
-// (boosted getUserMedia). Live words are produced by transcribing that same
-// boosted audio in short rolling chunks with Groq Whisper while you talk, so
-// what you see on screen is guaranteed to be what the real pipeline heard.
+// One mic pipeline only. An earlier version ran a second, independent
+// browser SpeechRecognition mic grab alongside this one to show live
+// captions; on Windows two simultaneous opens of the same physical mic
+// commonly starve one of them. Live words instead come from transcribing
+// this same recording in short rolling chunks, so what appears on screen is
+// by construction what the real pipeline captured.
 let partialTimer=null, partialBusy=false;
 
 function startRollingTranscription(mimeType){
@@ -873,7 +873,7 @@ function startRollingTranscription(mimeType){
       const blob=new Blob(recordChunks,{type:mimeType});
       if(blob.size>2000){ // skip near-empty slivers
         const text=await transcribeWhisper(blob, mimeType);
-        if(text && voiceRunning && S.voiceStatus==='listening'){
+        if(isSpeech(text) && voiceRunning && S.voiceStatus==='listening'){
           S.voiceLive=text;
           updateVoiceTranscript(text, true);
         }
@@ -901,7 +901,6 @@ async function startListening(){
   updateVoiceTranscript('', true);
 
   const analyser=micStream._analyser;
-  const boosted=micStream._boosted;
   if(analyser) startVuMeter(analyser);
 
   recordChunks=[];
@@ -909,23 +908,26 @@ async function startListening(){
     ? 'audio/webm;codecs=opus'
     : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg';
 
-  mediaRecorder = new MediaRecorder(boosted||micStream, {mimeType, audioBitsPerSecond:64000});
+  // Record the raw getUserMedia stream directly — no Web Audio graph in the
+  // recording path. autoGainControl already lifts quiet voices.
+  mediaRecorder = new MediaRecorder(micStream, {mimeType, audioBitsPerSecond:64000});
   mediaRecorder.ondataavailable=e=>{ if(e.data.size>0) recordChunks.push(e.data); };
   mediaRecorder.start(100); // collect in 100ms chunks
   startRollingTranscription(mimeType);
 
-  // Silence detection: stop recording when quiet for 2s (after at least 1s of speech)
-  let speechSeen=false, silenceStart=null;
-  const silenceBuf=new Uint8Array(analyser?.frequencyBinCount||128);
-  const SPEECH_THRESH=3, SILENCE_MS=2200, MIN_SPEECH_MS=800;
+  // Silence detection on true peak amplitude. 0.012 sits above typical room
+  // noise and below even a quiet speaking voice.
+  let speechSeen=false, silenceStart=null, loudest=0;
+  const levelBuf=new Float32Array(analyser?analyser.fftSize:2048);
+  const SPEECH_THRESH=0.012, SILENCE_MS=2200, MIN_SPEECH_MS=800;
   const recordStart=Date.now();
 
   await new Promise(resolve=>{
     function poll(){
       if(!voiceRunning||!mediaRecorder||mediaRecorder.state==='inactive'){ resolve(); return; }
       if(analyser){
-        analyser.getByteFrequencyData(silenceBuf);
-        const level=silenceBuf.reduce((a,b)=>a+b,0)/silenceBuf.length;
+        const level=peakLevel(analyser, levelBuf);
+        if(level>loudest) loudest=level;
         if(level>SPEECH_THRESH){ speechSeen=true; silenceStart=null; }
         else if(speechSeen){
           if(!silenceStart) silenceStart=Date.now();
@@ -940,26 +942,31 @@ async function startListening(){
   });
 
   if(silenceRaf){ cancelAnimationFrame(silenceRaf); silenceRaf=null; }
-  updateVuLevel(0);
+  stopVuMeter();
   stopRollingTranscription();
 
   if(!voiceRunning) return;
 
-  // Need at least MIN_SPEECH_MS of speech captured
   const elapsed=Date.now()-recordStart;
-  if(!speechSeen && elapsed<MIN_SPEECH_MS){
-    // nothing heard — re-listen
-    if(mediaRecorder&&mediaRecorder.state!=='inactive') mediaRecorder.stop();
-    mediaRecorder=null;
-    setTimeout(()=>startListening(),300);
-    return;
-  }
-
   S.voiceStatus='processing';
   updateVoiceStatus('Processing…');
   await new Promise(r=>{ if(mediaRecorder.state!=='inactive'){ mediaRecorder.onstop=r; mediaRecorder.stop(); }else r(); });
 
   const blob=new Blob(recordChunks,{type:mimeType});
+  console.info('capture:', {peak:loudest.toFixed(4), speechSeen, ms:elapsed, bytes:blob.size});
+
+  // The mic produced no usable signal at all. Say so plainly instead of
+  // looping forever on "could not hear that" — a silent retry loop hides a
+  // device/permission problem the candidate needs to actually fix.
+  if(loudest < 0.004){
+    S.voiceTranscript='No sound reached the microphone (peak level '+loudest.toFixed(4)+'). '
+      + 'Check that Windows is using the right input device and the mic is not muted, '
+      + 'then click the mic to try again. Open /mic-test for a full diagnostic.';
+    S.voiceStatus='error';
+    renderVoiceLayout();
+    return;
+  }
+
   let answer='';
   try{
     answer = await transcribeWhisper(blob, mimeType);
@@ -968,12 +975,13 @@ async function startListening(){
     console.warn('Whisper failed, using SpeechRecognition fallback:', err.message);
     answer = await recognizeFallback();
   }
-  if(!answer.trim() && S.voiceLive.trim()) answer = S.voiceLive.trim(); // last resort: use last rolling preview
+  if(!isSpeech(answer) && isSpeech(S.voiceLive)) answer = S.voiceLive.trim(); // last resort: last rolling preview
 
-  if(!answer.trim()){
-    S.voiceTranscript='Could not hear that clearly. Please try again.';
+  if(!isSpeech(answer)){
+    S.voiceTranscript='Could not make out any words (mic peak '+loudest.toFixed(3)+'). Try speaking a little louder or closer to the mic.';
     updateVoiceTranscript(S.voiceTranscript);
-    setTimeout(()=>startListening(),800);
+    S.voiceStatus='idle'; renderMicBtn();
+    setTimeout(()=>{ if(voiceRunning) startListening(); },1200);
     return;
   }
 
@@ -1017,6 +1025,23 @@ function retryVoiceAnswer(){
   S.voiceAwaitingConfirm=false; S.voicePendingAnswer=''; S.voiceTranscript='';
   voiceRunning=true;
   startListening();
+}
+
+// Whisper does not return an empty string for silence — it hallucinates a
+// short filler. A bare ".", "you", "Thank you." and similar are its standard
+// outputs for a near-empty clip, and treating them as a real answer is how a
+// silent mic ends up submitted to the interview as the candidate's response.
+const WHISPER_NULLS = new Set([
+  '.', '. .', '..', '...', 'you', 'thank you', 'thanks for watching',
+  'thank you for watching', 'bye', 'okay', 'ok', 'uh', 'um', 'mm', 'hmm',
+  'subtitles by the amara.org community', 'silence', '[blank_audio]',
+]);
+function isSpeech(text){
+  const t=(text||'').trim();
+  if(t.length<2) return false;
+  const norm=t.toLowerCase().replace(/[.!?,]+$/,'').trim();
+  if(WHISPER_NULLS.has(norm)) return false;
+  return /[a-z]{2}/i.test(norm); // must contain at least one real word
 }
 
 // ── Groq Whisper transcription ──

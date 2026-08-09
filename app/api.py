@@ -132,6 +132,17 @@ def index():
     return FileResponse(page)
 
 
+@app.get("/mic-test")
+def mic_test():
+    """Standalone microphone diagnostic. Measures each stage of the voice
+    pipeline separately so a silent capture can be traced to the exact stage
+    that dropped it, rather than guessed at."""
+    page = STATIC / "mic-test.html"
+    if not page.exists():
+        return JSONResponse({"error": "diagnostic page missing"}, status_code=404)
+    return FileResponse(page)
+
+
 # ---------------------------------------------------------------------------
 # LiveKit token — no extra deps, pure JWT HS256
 # ---------------------------------------------------------------------------

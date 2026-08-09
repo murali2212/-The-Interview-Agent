@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Mic Diagnostic — ABTalks</title>
+<style>
+:root{--bg:#0a0b0d;--panel:#14171d;--line:#23272f;--text:#e6e8ec;--dim:#8b929e;
+--accent:#6ea8fe;--good:#4ec9a0;--bad:#e0705f;--warn:#e0b654;
+--mono:ui-monospace,Consolas,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:14px/1.6 system-ui,sans-serif;padding:32px 24px;max-width:820px;margin:0 auto}
+h1{font-size:20px;margin-bottom:6px}
+.lede{color:var(--dim);margin-bottom:24px}
+button{font:inherit;background:var(--accent);border:none;border-radius:6px;padding:12px 24px;color:#06080c;font-weight:600;cursor:pointer}
+button:disabled{opacity:.4;cursor:not-allowed}
+.row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 14px;border:1px solid var(--line);border-radius:6px;margin-bottom:6px;background:var(--panel)}
+.row .k{font-family:var(--mono);font-size:12px;color:var(--dim)}
+.row .v{font-family:var(--mono);font-size:12px;text-align:right}
+.ok{color:var(--good)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+.meter{height:10px;background:var(--line);border-radius:5px;overflow:hidden;margin:6px 0 18px}
+.meter div{height:10px;background:var(--accent);width:0%;transition:width .05s}
+h2{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--dim);margin:24px 0 10px}
+pre{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:14px;font-size:11.5px;overflow-x:auto;white-space:pre-wrap;word-break:break-word}
+input{font:inherit;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px;color:var(--text);width:100%;margin-bottom:14px}
+.big{font-size:28px;font-family:var(--mono);text-align:center;padding:16px 0}
+</style>
+</head>
+<body>
+<h1>Microphone Diagnostic</h1>
+<p class="lede">This measures each stage of the voice pipeline separately so we can see exactly where the audio is being lost. Speak normally when it asks you to.</p>
+
+<input id="key" type="password" placeholder="Groq API key (optional — tests Whisper stage)" autocomplete="off"/>
+<button id="run">Run 6-second test — speak when it starts</button>
+
+<div class="big" id="phase">idle</div>
+<div class="meter"><div id="bar"></div></div>
+
+<h2>Results</h2>
+<div id="results"></div>
+
+<h2>Raw log</h2>
+<pre id="log">waiting…</pre>
+
+<script>
+const $=id=>document.getElementById(id);
+const lines=[];
+function log(s){ lines.push(s); $('log').textContent=lines.join('\n'); console.log(s); }
+function row(k,v,cls){
+  const d=document.createElement('div');
+  d.className='row';
+  d.innerHTML=`<span class="k">${k}</span><span class="v ${cls||''}">${v}</span>`;
+  $('results').appendChild(d);
+}
+
+$('run').onclick=async()=>{
+  $('run').disabled=true; $('results').innerHTML=''; lines.length=0;
+  try{ await runTest(); }
+  catch(e){ log('FATAL: '+e.name+': '+e.message); row('fatal error',e.message,'bad'); }
+  $('run').disabled=false; $('phase').textContent='done';
+};
+
+async function runTest(){
+  // ── 1. Device enumeration ──
+  $('phase').textContent='checking devices';
+  log('secure context: '+window.isSecureContext);
+  log('userAgent: '+navigator.userAgent);
+  row('secure context (https/localhost)', window.isSecureContext?'yes':'NO — mic blocked', window.isSecureContext?'ok':'bad');
+
+  let devices=[];
+  try{
+    devices=await navigator.mediaDevices.enumerateDevices();
+    const mics=devices.filter(d=>d.kind==='audioinput');
+    log('audioinput devices: '+mics.length);
+    mics.forEach(m=>log('  - '+(m.label||'(label hidden until permission granted)')+' id='+m.deviceId.slice(0,12)));
+    row('microphones found', mics.length, mics.length?'ok':'bad');
+  }catch(e){ log('enumerateDevices failed: '+e.message); }
+
+  // ── 2. getUserMedia ──
+  $('phase').textContent='requesting mic';
+  let stream;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:{
+      echoCancellation:true, noiseSuppression:true, autoGainControl:true
+    }});
+  }catch(e){
+    log('getUserMedia FAILED: '+e.name+' — '+e.message);
+    row('getUserMedia', e.name, 'bad');
+    return;
+  }
+  const track=stream.getAudioTracks()[0];
+  const settings=track.getSettings();
+  log('track label: '+track.label);
+  log('track readyState: '+track.readyState);
+  log('track muted: '+track.muted);
+  log('track enabled: '+track.enabled);
+  log('settings: '+JSON.stringify(settings));
+  row('mic device', track.label||'(unnamed)','ok');
+  row('track.readyState', track.readyState, track.readyState==='live'?'ok':'bad');
+  row('track.muted (OS-level mute)', String(track.muted), track.muted?'bad':'ok');
+  row('track.enabled', String(track.enabled), track.enabled?'ok':'bad');
+  row('actual sampleRate', settings.sampleRate||'(not reported)','');
+  row('channelCount', settings.channelCount||'(not reported)','');
+
+  // ── 3. AudioContext + analysers ──
+  $('phase').textContent='building audio graph';
+  const ctx=new AudioContext();
+  if(ctx.state==='suspended') await ctx.resume();
+  log('AudioContext state: '+ctx.state+'  sampleRate: '+ctx.sampleRate);
+  row('AudioContext.state', ctx.state, ctx.state==='running'?'ok':'bad');
+  row('AudioContext.sampleRate', ctx.sampleRate, '');
+
+  const src=ctx.createMediaStreamSource(stream);
+  const rawAn=ctx.createAnalyser(); rawAn.fftSize=2048;
+  src.connect(rawAn);
+
+  const gain=ctx.createGain(); gain.gain.value=4;
+  const boostAn=ctx.createAnalyser(); boostAn.fftSize=2048;
+  src.connect(gain); gain.connect(boostAn);
+
+  const dest=ctx.createMediaStreamDestination();
+  gain.connect(dest);
+  log('dest.stream tracks: '+dest.stream.getAudioTracks().length);
+  const destTrack=dest.stream.getAudioTracks()[0];
+  log('dest track readyState: '+(destTrack?destTrack.readyState:'NONE'));
+  row('boosted stream track', destTrack?destTrack.readyState:'MISSING', destTrack&&destTrack.readyState==='live'?'ok':'bad');
+
+  // ── 4. Record 6 seconds from BOTH raw and boosted, measure levels ──
+  $('phase').textContent='SPEAK NOW (6s)';
+  const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')?'audio/webm;codecs=opus'
+             : MediaRecorder.isTypeSupported('audio/webm')?'audio/webm':'audio/ogg';
+  log('MediaRecorder mimeType: '+mime);
+  row('MediaRecorder mimeType', mime, 'ok');
+
+  const rawChunks=[], boostChunks=[];
+  const recRaw=new MediaRecorder(stream,{mimeType:mime});
+  const recBoost=new MediaRecorder(dest.stream,{mimeType:mime});
+  recRaw.ondataavailable=e=>{ if(e.data.size) rawChunks.push(e.data); };
+  recBoost.ondataavailable=e=>{ if(e.data.size) boostChunks.push(e.data); };
+  recRaw.start(100); recBoost.start(100);
+
+  // sample levels using time-domain data (true amplitude, not FFT bins)
+  const rawBuf=new Float32Array(rawAn.fftSize);
+  const boostBuf=new Float32Array(boostAn.fftSize);
+  let rawPeak=0, boostPeak=0, rawSum=0, boostSum=0, samples=0;
+
+  const t0=Date.now();
+  await new Promise(resolve=>{
+    function tick(){
+      if(Date.now()-t0>6000){ resolve(); return; }
+      rawAn.getFloatTimeDomainData(rawBuf);
+      boostAn.getFloatTimeDomainData(boostBuf);
+      let r=0,b=0;
+      for(let i=0;i<rawBuf.length;i++){ r=Math.max(r,Math.abs(rawBuf[i])); }
+      for(let i=0;i<boostBuf.length;i++){ b=Math.max(b,Math.abs(boostBuf[i])); }
+      rawPeak=Math.max(rawPeak,r); boostPeak=Math.max(boostPeak,b);
+      rawSum+=r; boostSum+=b; samples++;
+      $('bar').style.width=Math.min(100,r*300)+'%';
+      const left=Math.ceil((6000-(Date.now()-t0))/1000);
+      $('phase').textContent='SPEAK NOW — '+left+'s';
+      requestAnimationFrame(tick);
+    }
+    tick();
+  });
+
+  $('phase').textContent='analysing';
+  $('bar').style.width='0%';
+  await new Promise(r=>{ recRaw.onstop=r; recRaw.stop(); });
+  await new Promise(r=>{ recBoost.onstop=r; recBoost.stop(); });
+
+  const rawAvg=rawSum/Math.max(1,samples), boostAvg=boostSum/Math.max(1,samples);
+  log(`RAW  peak=${rawPeak.toFixed(4)} avg=${rawAvg.toFixed(4)}`);
+  log(`BOOST peak=${boostPeak.toFixed(4)} avg=${boostAvg.toFixed(4)}`);
+
+  row('RAW mic peak amplitude', rawPeak.toFixed(4), rawPeak>0.02?'ok':rawPeak>0.001?'warn':'bad');
+  row('RAW mic average amplitude', rawAvg.toFixed(4), rawAvg>0.005?'ok':'warn');
+  row('BOOSTED peak amplitude', boostPeak.toFixed(4), boostPeak>0.02?'ok':boostPeak>0.001?'warn':'bad');
+
+  const rawBlob=new Blob(rawChunks,{type:mime});
+  const boostBlob=new Blob(boostChunks,{type:mime});
+  log('raw blob bytes: '+rawBlob.size+'  ('+rawChunks.length+' chunks)');
+  log('boost blob bytes: '+boostBlob.size+'  ('+boostChunks.length+' chunks)');
+  row('RAW recording size', rawBlob.size+' bytes', rawBlob.size>8000?'ok':'bad');
+  row('BOOSTED recording size', boostBlob.size+' bytes', boostBlob.size>8000?'ok':'bad');
+
+  // playback so the user can hear what was captured
+  const url=URL.createObjectURL(boostBlob.size>1000?boostBlob:rawBlob);
+  const audio=document.createElement('audio');
+  audio.controls=true; audio.src=url; audio.style.cssText='width:100%;margin-top:10px';
+  $('results').appendChild(audio);
+  log('playback element added — press play to hear the captured audio');
+
+  // ── 5. Whisper ──
+  const key=$('key').value.trim();
+  if(!key){
+    row('Whisper test','skipped (no key entered)','warn');
+    log('no groq key — skipping Whisper stage');
+  }else{
+    for(const [label,blob] of [['RAW',rawBlob],['BOOSTED',boostBlob]]){
+      $('phase').textContent='transcribing '+label;
+      try{
+        const form=new FormData();
+        form.append('file', new File([blob],'a.webm',{type:mime}));
+        form.append('model','whisper-large-v3-turbo');
+        form.append('language','en');
+        form.append('response_format','text');
+        const r=await fetch('https://api.groq.com/openai/v1/audio/transcriptions',{
+          method:'POST', headers:{Authorization:'Bearer '+key}, body:form });
+        const txt=await r.text();
+        log(`Whisper ${label}: HTTP ${r.status} -> ${JSON.stringify(txt.slice(0,300))}`);
+        row(`Whisper (${label})`, r.ok?(txt.trim()||'(empty)'):('HTTP '+r.status),
+            r.ok&&txt.trim().length>2?'ok':'bad');
+      }catch(e){
+        log(`Whisper ${label} error: `+e.message);
+        row(`Whisper (${label})`, e.message, 'bad');
+      }
+    }
+  }
+
+  // ── 6. Verdict ──
+  let verdict;
+  if(rawPeak<0.001) verdict='MIC IS SILENT — the browser is receiving no audio at all. Check Windows mic privacy settings, the correct input device, and that the mic is not muted in the OS.';
+  else if(rawPeak>=0.001&&boostPeak<0.001) verdict='RAW mic works but the boosted Web Audio path is dead — recording should use the raw stream.';
+  else if(boostBlob.size<8000) verdict='Audio levels fine but MediaRecorder produced almost no data — the recorder is the failure point.';
+  else verdict='Capture pipeline looks healthy. If Whisper still returns nothing, the issue is at the Whisper/API stage.';
+  log('VERDICT: '+verdict);
+  const d=document.createElement('div');
+  d.className='row'; d.style.borderColor='var(--accent)';
+  d.innerHTML=`<span class="k">VERDICT</span><span class="v">${verdict}</span>`;
+  $('results').appendChild(d);
+
+  stream.getTracks().forEach(t=>t.stop());
+  ctx.close();
+}
+</script>
+</body>
+</html>
