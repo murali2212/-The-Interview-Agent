@@ -939,8 +939,8 @@ let recordChunks=[];
 // session — only the transcription step is replaced with a plausible
 // LLM-generated answer grounded in the candidate's profile, sent
 // automatically so the interview keeps moving on its own.
-// Turned on here for a specific recording session; ask to turn it back off.
-let DEMO_AUTO_ANSWER = true;
+// Off by default — real speech required. Only turn on for a recording session.
+let DEMO_AUTO_ANSWER = false;
 window.setDemoAutoAnswer = v => { DEMO_AUTO_ANSWER = !!v; console.info('demo auto-answer:', DEMO_AUTO_ANSWER); };
 
 async function runDemoAutoAnswer(){
