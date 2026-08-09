@@ -782,6 +782,12 @@ function loadScript(src){
 }
 
 // ── Microphone setup: request with gain boost via Web Audio API ──
+//
+// Forcing an exact sampleRate on BOTH getUserMedia and the AudioContext (as
+// this used to do) is a known source of dead/near-silent captures on
+// Windows Chrome when it doesn't match the device's native rate — the graph
+// runs but produces almost nothing. Letting the browser pick its own native
+// rate throughout fixes that; nothing here needs a specific rate.
 async function setupMic(){
   if(micStream) return; // already open
   micStream = await navigator.mediaDevices.getUserMedia({
@@ -789,24 +795,42 @@ async function setupMic(){
       echoCancellation:true,
       noiseSuppression:true,
       autoGainControl:true,  // browser-level AGC helps low voices
-      sampleRate:16000,
-      channelCount:1,
     }
   });
-  audioCtx = new AudioContext({sampleRate:16000});
+  audioCtx = new AudioContext();
   if(audioCtx.state==='suspended') await audioCtx.resume(); // Chrome can start contexts suspended even after a user gesture
   const source = audioCtx.createMediaStreamSource(micStream);
   const gain = audioCtx.createGain();
   gain.gain.value = 4; // 4× boost — lifts quiet voices above noise floor
   const analyser = audioCtx.createAnalyser();
   analyser.fftSize = 256;
+  analyser.smoothingTimeConstant = 0.35;
+  source.connect(analyser); // level metering taps the RAW signal, unaffected by gain
+  const boostedAnalyser = audioCtx.createAnalyser();
+  boostedAnalyser.fftSize = 256;
   source.connect(gain);
-  gain.connect(analyser);
+  gain.connect(boostedAnalyser); // sanity-check the boosted path actually carries signal
   // Boosted stream for recording
   const dest = audioCtx.createMediaStreamDestination();
   gain.connect(dest);
   micStream._boosted = dest.stream;
   micStream._analyser = analyser;
+  micStream._boostedAnalyser = boostedAnalyser;
+
+  // Self-test: if the boosted path is dead (common when a routing step
+  // silently fails) fall back to recording the raw, unboosted mic instead
+  // of shipping silence to Whisper every time.
+  await new Promise(r=>setTimeout(r,250));
+  const testBuf=new Uint8Array(boostedAnalyser.frequencyBinCount);
+  boostedAnalyser.getByteFrequencyData(testBuf);
+  const rawBuf=new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(rawBuf);
+  const boostedLevel=testBuf.reduce((a,b)=>a+b,0);
+  const rawLevel=rawBuf.reduce((a,b)=>a+b,0);
+  if(boostedLevel===0 && rawLevel>0){
+    console.warn('Boosted mic path produced no signal — recording raw mic instead');
+    micStream._boosted = null;
+  }
 }
 
 // ── VU meter — updates the level bar while listening ──
@@ -824,7 +848,7 @@ function startVuMeter(analyser){
 
 function updateVuLevel(v){
   const bar=document.getElementById('vu-bar');
-  if(bar) bar.style.width=Math.min(100,v*200)+'%';
+  if(bar) bar.style.width=Math.min(100,v*400)+'%'; // raw (unboosted) signal reads quiet — scale up for visibility
 }
 
 // ── Record audio until silence, then transcribe with Groq Whisper ──
@@ -893,7 +917,7 @@ async function startListening(){
   // Silence detection: stop recording when quiet for 2s (after at least 1s of speech)
   let speechSeen=false, silenceStart=null;
   const silenceBuf=new Uint8Array(analyser?.frequencyBinCount||128);
-  const SPEECH_THRESH=6, SILENCE_MS=2200, MIN_SPEECH_MS=800;
+  const SPEECH_THRESH=3, SILENCE_MS=2200, MIN_SPEECH_MS=800;
   const recordStart=Date.now();
 
   await new Promise(resolve=>{
