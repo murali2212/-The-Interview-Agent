@@ -145,46 +145,6 @@ def mic_test():
 
 
 # ---------------------------------------------------------------------------
-# Demo auto-answer — for recording a walkthrough without speaking every turn.
-# Generates a plausible spoken-style answer to the current question grounded
-# in the candidate's real profile, so the demo interview still moves through
-# real content instead of placeholder text. Not part of the graded contract.
-# ---------------------------------------------------------------------------
-
-
-class DemoAnswerRequest(BaseModel):
-    sessionId: str
-
-
-@app.post("/api/demo-answer")
-def demo_answer(req: DemoAnswerRequest) -> JSONResponse:
-    s = store.get(req.sessionId)
-    if s is None or not s.turns:
-        return JSONResponse({"answer": "Yes, that's something I worked through directly during the cohort."})
-
-    question = s.turns[-1].question
-    ctx = f"Candidate: {s.profile.name}, {s.profile.role or 'unspecified role'}, {s.profile.years} years experience."
-
-    prompt = ChatPromptTemplate.from_messages([
-        (
-            "system",
-            "You are role-playing as an AI cohort graduate being interviewed about their coursework. "
-            "Give a short, natural, spoken-style answer — 2 to 3 sentences, plain prose, no markdown, "
-            "no bullet points. Sound like a real candidate speaking out loud: specific, a little "
-            "informal, referencing plausible tools or concepts relevant to the question.",
-        ),
-        ("user", "{ctx}\n\nInterviewer question: {q}\n\nYour spoken answer:"),
-    ])
-    answer = llm.ask(
-        prompt,
-        {"ctx": ctx, "q": question},
-        fallback="Yes, I worked through that directly. I remember trying a couple of approaches and "
-        "landing on one that held up once I tested it properly.",
-    )
-    return JSONResponse({"answer": answer})
-
-
-# ---------------------------------------------------------------------------
 # Candidate ingest — accept JSON / PDF / text, LLM-shape non-JSON
 # ---------------------------------------------------------------------------
 
