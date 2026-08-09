@@ -932,20 +932,59 @@ function stopRollingTranscription(){
 
 let recordChunks=[];
 
+// ── Demo auto-answer mode ──
+// For recording a walkthrough without speaking every one of the 8 answers.
+// The question is still spoken aloud and the mic still visibly activates
+// (listening status, VU meter) so the flow looks identical to a real
+// session — only the transcription step is replaced with a plausible
+// LLM-generated answer grounded in the candidate's profile, sent
+// automatically so the interview keeps moving on its own.
+// Turned on here for a specific recording session; ask to turn it back off.
+let DEMO_AUTO_ANSWER = true;
+window.setDemoAutoAnswer = v => { DEMO_AUTO_ANSWER = !!v; console.info('demo auto-answer:', DEMO_AUTO_ANSWER); };
+
+async function runDemoAutoAnswer(){
+  const analyser=micStream&&micStream._analyser;
+  if(analyser) startVuMeter(analyser); // real mic level if any sound is present, harmless if silent
+  await new Promise(r=>setTimeout(r, 2200+Math.random()*1400)); // feels like a real pause to answer
+  stopVuMeter();
+  if(!voiceRunning || !DEMO_AUTO_ANSWER) return;
+
+  S.voiceStatus='processing';
+  updateVoiceStatus('Processing…');
+  let answer='Yes, I worked through that directly during the cohort.';
+  try{
+    const d=await api('/api/demo-answer',{sessionId:S.sessionId});
+    if(d.answer) answer=d.answer;
+  }catch(e){ console.warn('demo-answer failed, using fallback:', e.message); }
+
+  if(!voiceRunning || !DEMO_AUTO_ANSWER) return;
+  S.voiceTranscript=answer;
+  updateVoiceTranscript(answer, false);
+  await confirmVoiceAnswer(answer); // auto-send, no confirm click needed
+}
+
 async function startListening(){
   if(!voiceRunning) return;
 
+  // In demo mode the mic is cosmetic only (VU meter), never load-bearing —
+  // a denied/unavailable mic must not block the auto-answer flow.
   try{ await setupMic(); }catch(e){
-    S.voiceTranscript='Microphone access denied. Please allow mic and click retry.';
-    S.voiceStatus='error'; renderVoiceLayout(); return;
+    if(!DEMO_AUTO_ANSWER){
+      S.voiceTranscript='Microphone access denied. Please allow mic and click retry.';
+      S.voiceStatus='error'; renderVoiceLayout(); return;
+    }
+    console.warn('demo mode: mic unavailable, continuing without VU meter:', e.message);
   }
 
   S.voiceStatus='listening'; S.voiceTranscript=''; S.voiceLive='';
   updateVoiceStatus('Listening — speak now…');
   updateVoiceTranscript('', true);
 
-  const analyser=micStream._analyser;
+  const analyser=micStream&&micStream._analyser;
   if(analyser) startVuMeter(analyser);
+
+  if(DEMO_AUTO_ANSWER){ await runDemoAutoAnswer(); return; }
 
   recordChunks=[];
   const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
@@ -1135,14 +1174,21 @@ function speakText(text){
     let i=0;
     function next(){
       if(i>=sentences.length||!voiceRunning){ S.voiceStatus='idle'; renderMicBtn(); resolve(); return; }
-      const utt=new SpeechSynthesisUtterance(sentences[i++].trim());
+      const sentence=sentences[i++].trim();
+      const utt=new SpeechSynthesisUtterance(sentence);
       utt.voice = selectedVoice || selectBestVoice();
       utt.lang='en-US';
       utt.rate=0.88;    // slightly slower = more human
       utt.pitch=1.0;
       utt.volume=1.0;
-      utt.onend=next;
-      utt.onerror=next;
+      let settled=false;
+      const advance=()=>{ if(settled) return; settled=true; clearTimeout(safety); next(); };
+      // Some browsers/headless contexts never fire onend/onerror (e.g. no
+      // TTS voices installed) and speak() just silently does nothing —
+      // without a bound the whole interview freezes on "speaking" forever.
+      const safety=setTimeout(advance, Math.max(3000, sentence.length*95));
+      utt.onend=advance;
+      utt.onerror=advance;
       synth.speak(utt);
     }
     next();
