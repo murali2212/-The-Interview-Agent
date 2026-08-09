@@ -150,7 +150,13 @@ header{display:flex;align-items:center;gap:12px;padding:11px 18px;border-bottom:
 .voice-question{max-width:600px;width:100%;background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--accent);border-radius:8px;padding:18px 20px}
 .voice-question .label{font-size:10px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;color:var(--accent);margin-bottom:8px}
 .voice-question .text{font-size:16px;line-height:1.6;color:var(--text)}
-.voice-transcript{max-width:600px;width:100%;min-height:60px;background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:14px 16px;font-size:14px;color:var(--dim);font-style:italic}
+.voice-transcript{max-width:600px;width:100%;min-height:60px;background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:14px 16px;font-size:14px;color:var(--dim);font-style:italic;transition:all .15s}
+.voice-transcript.live{color:var(--text);font-style:normal;border-color:var(--accent)}
+.voice-confirm{max-width:600px;width:100%;background:var(--panel);border:1px solid var(--accent);border-radius:8px;padding:16px 18px;animation:rise .25s ease-out}
+.voice-confirm .label{font-size:10px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.1em;color:var(--accent);margin-bottom:10px}
+.voice-confirm textarea{width:100%;min-height:70px;background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:10px 12px;color:var(--text);font:14px/1.5 var(--sans);resize:vertical}
+.voice-confirm textarea:focus{outline:none;border-color:var(--accent)}
+.voice-confirm-actions{display:flex;gap:8px;margin-top:12px;justify-content:flex-end}
 .mic-wrap{display:flex;flex-direction:column;align-items:center;gap:14px}
 .mic-btn{width:80px;height:80px;border-radius:50%;border:2px solid var(--line);background:var(--panel);display:flex;align-items:center;justify-content:center;font-size:28px;cursor:pointer;transition:all .2s;position:relative}
 .mic-btn.listening{border-color:var(--bad);background:rgba(224,112,95,.1);animation:mic-pulse 1.5s infinite}
@@ -331,7 +337,7 @@ const S = {
 
   // voice
   voiceQuestion: '', voiceStatus: 'idle', voiceTranscript: '',
-  voiceDone: false,
+  voiceDone: false, voiceLive: '', voiceAwaitingConfirm: false, voicePendingAnswer: '',
 };
 
 let stick=true, chatTop=0, sideTop=0, ignoreScroll=false;
@@ -446,7 +452,8 @@ function resetInterview(){
   S.sessionId=null; S.messages=[]; S.insight=null;
   S.done=false; S.feedback=null; S.error=null; S.draft='';
   S.voiceQuestion=''; S.voiceStatus='idle'; S.voiceTranscript=''; S.voiceDone=false;
-  stopVoice();
+  S.voiceLive=''; S.voiceAwaitingConfirm=false; S.voicePendingAnswer='';
+  stopVoice(); stopLiveCaption();
   gotoPage('roster');
 }
 
@@ -718,6 +725,7 @@ function initVoices(){
 
 function stopVoice(){
   voiceRunning=false;
+  if(typeof stopLiveCaption==='function') stopLiveCaption();
   if(silenceRaf){ cancelAnimationFrame(silenceRaf); silenceRaf=null; }
   if(mediaRecorder&&mediaRecorder.state!=='inactive'){ try{ mediaRecorder.stop(); }catch(e){} mediaRecorder=null; }
   if(micStream){ micStream.getTracks().forEach(t=>t.stop()); micStream=null; }
@@ -819,6 +827,32 @@ function updateVuLevel(v){
 }
 
 // ── Record audio until silence, then transcribe with Groq Whisper ──
+// Live captioning: browser SpeechRecognition running purely for on-screen
+// display while the user talks, so they can see what's being picked up in
+// real time. The actual answer sent to the interview always comes from
+// Groq Whisper afterwards — this is display-only and never authoritative.
+let liveCaption=null;
+function startLiveCaption(){
+  const SpeechRec=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SpeechRec) return;
+  try{
+    liveCaption=new SpeechRec();
+    liveCaption.lang='en-US'; liveCaption.interimResults=true; liveCaption.continuous=true;
+    liveCaption.onresult=e=>{
+      let text='';
+      for(let i=0;i<e.results.length;i++) text+=e.results[i][0].transcript+(e.results[i].isFinal?' ':'');
+      S.voiceLive=text.trim();
+      updateVoiceTranscript(S.voiceLive, true);
+    };
+    liveCaption.onerror=()=>{};
+    liveCaption.onend=()=>{ if(voiceRunning && S.voiceStatus==='listening'){ try{ liveCaption.start(); }catch(e){} } };
+    liveCaption.start();
+  }catch(e){ liveCaption=null; }
+}
+function stopLiveCaption(){
+  if(liveCaption){ liveCaption.onend=null; try{ liveCaption.stop(); }catch(e){} liveCaption=null; }
+}
+
 async function startListening(){
   if(!voiceRunning) return;
 
@@ -827,9 +861,10 @@ async function startListening(){
     S.voiceStatus='error'; renderVoiceLayout(); return;
   }
 
-  S.voiceStatus='listening'; S.voiceTranscript='';
+  S.voiceStatus='listening'; S.voiceTranscript=''; S.voiceLive='';
   updateVoiceStatus('Listening — speak now…');
-  updateVoiceTranscript('');
+  updateVoiceTranscript('', true);
+  startLiveCaption();
 
   const analyser=micStream._analyser;
   const boosted=micStream._boosted;
@@ -871,6 +906,7 @@ async function startListening(){
 
   if(silenceRaf){ cancelAnimationFrame(silenceRaf); silenceRaf=null; }
   updateVuLevel(0);
+  stopLiveCaption();
 
   if(!voiceRunning) return;
 
@@ -897,6 +933,7 @@ async function startListening(){
     console.warn('Whisper failed, using SpeechRecognition fallback:', err.message);
     answer = await recognizeFallback();
   }
+  if(!answer.trim() && S.voiceLive.trim()) answer = S.voiceLive.trim(); // last resort: use live caption
 
   if(!answer.trim()){
     S.voiceTranscript='Could not hear that clearly. Please try again.';
@@ -905,10 +942,21 @@ async function startListening(){
     return;
   }
 
+  // Show what was heard and wait for the candidate to confirm it before sending.
   S.voiceTranscript=answer;
-  updateVoiceTranscript(answer);
-  S.voiceStatus='sending';
-  updateVoiceStatus('Sending…');
+  S.voicePendingAnswer=answer;
+  S.voiceAwaitingConfirm=true;
+  S.voiceStatus='confirm';
+  updateVoiceStatus('Confirm your answer');
+  renderVoiceLayout();
+}
+
+// Called when the candidate clicks "Send this answer" in the confirm box.
+async function confirmVoiceAnswer(text){
+  const answer=(text||'').trim();
+  if(!answer) return;
+  S.voiceAwaitingConfirm=false; S.voiceStatus='sending';
+  renderVoiceLayout();
 
   try{
     const d=await api('/api/interview',{sessionId:S.sessionId,message:answer});
@@ -927,6 +975,13 @@ async function startListening(){
     S.voiceQuestion='Error: '+e.message;
     renderVoiceLayout();
   }
+}
+
+// Called when the candidate clicks "Retry" in the confirm box — discard and re-record.
+function retryVoiceAnswer(){
+  S.voiceAwaitingConfirm=false; S.voicePendingAnswer=''; S.voiceTranscript='';
+  voiceRunning=true;
+  startListening();
 }
 
 // ── Groq Whisper transcription ──
@@ -1019,9 +1074,11 @@ function updateVoiceStatus(msg){
   if(el) el.textContent=msg;
   renderMicBtn();
 }
-function updateVoiceTranscript(text){
+function updateVoiceTranscript(text, isLive){
   const el=document.getElementById('voice-transcript');
-  if(el) el.textContent=text||'Say your answer…';
+  if(!el) return;
+  el.textContent=text||(S.voiceStatus==='listening'?'Listening… say your answer':'Say your answer…');
+  el.classList.toggle('live', !!isLive && !!text);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1051,8 +1108,29 @@ function renderVoiceLayout(){
 
   const isListening=S.voiceStatus==='listening';
   const isSpeaking=S.voiceStatus==='speaking';
+  const isConfirm=S.voiceStatus==='confirm'&&S.voiceAwaitingConfirm;
   const micClass=isListening?'mic-btn listening':isSpeaking?'mic-btn speaking':'mic-btn';
-  const micLabel=isListening?'Listening…':isSpeaking?'Speaking…':S.voiceStatus==='connecting'?'Connecting…':'Tap to speak';
+
+  const confirmBox = isConfirm ? `
+      <div class="voice-confirm">
+        <div class="label">This is what we heard — check it, then send</div>
+        <textarea id="confirm-text">${esc(S.voicePendingAnswer)}</textarea>
+        <div class="voice-confirm-actions">
+          <button class="ghost" id="confirm-retry">🔁 Retry — record again</button>
+          <button class="primary" id="confirm-send">✓ Send this answer</button>
+        </div>
+      </div>` : '';
+
+  const micWrap = isConfirm ? '' : `
+      <div class="mic-wrap">
+        <button class="${micClass}" id="mic-btn" title="${isListening?'Listening':'Click to speak'}">
+          ${isListening?'🔴':isSpeaking?'🔊':'🎙️'}
+        </button>
+        <div style="width:160px;height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin:0 auto">
+          <div id="vu-bar" style="height:4px;background:var(--accent);width:0%;border-radius:2px;transition:width .05s"></div>
+        </div>
+        <div class="mic-status" id="voice-status-label">${isListening?'Listening…':isSpeaking?'Interviewer speaking…':S.voiceStatus==='sending'?'Sending…':'Tap to speak'}</div>
+      </div>`;
 
   const voiceCol=document.createElement('section');
   voiceCol.className='col'; voiceCol.id='voice-col';
@@ -1064,21 +1142,14 @@ function renderVoiceLayout(){
         <div class="label">Interviewer</div>
         <div class="text" id="voice-question-text">${esc(S.voiceQuestion||'Starting interview…')}</div>
       </div>
-      <div class="voice-transcript" id="voice-transcript">${esc(S.voiceTranscript)||'Say your answer…'}</div>
-      <div class="mic-wrap">
-        <button class="${micClass}" id="mic-btn" title="${isListening?'Listening':'Click to speak'}">
-          ${isListening?'🔴':isSpeaking?'🔊':'🎙️'}
-        </button>
-        <div style="width:160px;height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin:0 auto">
-          <div id="vu-bar" style="height:4px;background:var(--accent);width:0%;border-radius:2px;transition:width .05s"></div>
-        </div>
-        <div class="mic-status" id="voice-status-label">${isListening?'Listening…':isSpeaking?'Interviewer speaking…':'Tap to speak'}</div>
-      </div>
+      ${isConfirm?'':`<div class="voice-transcript${isListening&&S.voiceLive?' live':''}" id="voice-transcript">${esc(S.voiceTranscript||S.voiceLive)||'Say your answer…'}</div>`}
+      ${confirmBox}
+      ${micWrap}
     </div>`;
   ivBody.insertBefore(voiceCol, side);
 
   const micBtn=voiceCol.querySelector('#mic-btn');
-  micBtn.onclick=()=>{
+  if(micBtn) micBtn.onclick=()=>{
     if(S.voiceStatus==='speaking'){ synth.cancel(); S.voiceStatus='idle'; renderMicBtn(); }
     else if(S.voiceStatus==='listening'){
       // stop recording early — silence detection will trigger
@@ -1087,6 +1158,13 @@ function renderVoiceLayout(){
       voiceRunning=true; startListening();
     }
   };
+
+  const sendBtn=voiceCol.querySelector('#confirm-send');
+  const retryBtn=voiceCol.querySelector('#confirm-retry');
+  const textEl=voiceCol.querySelector('#confirm-text');
+  if(sendBtn) sendBtn.onclick=()=>confirmVoiceAnswer(textEl?textEl.value:S.voicePendingAnswer);
+  if(retryBtn) retryBtn.onclick=()=>retryVoiceAnswer();
+  if(textEl) setTimeout(()=>{ textEl.focus(); textEl.selectionStart=textEl.value.length; },0);
 }
 
 function renderVoiceFeedback(){
