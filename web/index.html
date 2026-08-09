@@ -78,7 +78,17 @@ input:focus,textarea:focus{border-color:var(--accent)}
 .roster-inner h1{font-size:24px;font-weight:600;margin-bottom:6px;letter-spacing:-.01em}
 .roster-lede{color:var(--dim);margin-bottom:22px}
 .mode-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 9px;border:1px solid var(--line);border-radius:20px;color:var(--dim);margin-bottom:20px;font-family:var(--mono)}
-.filter{width:100%;max-width:340px;margin-bottom:16px}
+.filter{flex:1;min-width:0}
+.roster-tools{display:flex;gap:10px;align-items:stretch;max-width:520px;margin-bottom:16px}
+.roster-tools .filter{max-width:340px}
+.btn-add-cand{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:0 14px;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap;transition:border-color .15s,background .15s}
+.btn-add-cand:hover{border-color:var(--accent);background:var(--panel2)}
+.modal.wide{max-width:560px}
+.modal input[type=file]{color:var(--text);font:inherit}
+.modal input[type=file]::file-selector-button{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:8px 14px;margin-right:12px;font:inherit;font-size:13px;cursor:pointer;transition:border-color .15s}
+.modal input[type=file]::file-selector-button:hover{border-color:var(--accent)}
+.file-picked{font-size:12px;color:var(--dim);margin-top:8px;font-family:ui-monospace,Consolas,monospace}
+.modal .err{color:var(--bad);font-size:12px;margin-top:8px;min-height:16px}
 .cand{display:flex;justify-content:space-between;align-items:center;gap:16px;border:1px solid var(--line);border-radius:8px;padding:14px 16px;margin-bottom:8px;background:var(--panel);transition:all .15s;cursor:pointer}
 .cand:hover{border-color:var(--dim);transform:translateX(2px)}
 .cand .who{font-weight:600}
@@ -290,13 +300,35 @@ h3{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--dimm
   </div>
 </div>
 
+<!-- MODAL: ADD CANDIDATE -->
+<div class="backdrop" id="modal-add-cand">
+  <div class="modal wide">
+    <h2>Add your own candidate</h2>
+    <p class="sub">Upload any file — resume PDF, notes, or a candidate JSON. Non-JSON files are shaped into the interview contract by the LLM.</p>
+    <div class="field">
+      <label>Candidate file</label>
+      <input type="file" id="add-cand-file" accept=".json,.pdf,.txt,.md,application/json,application/pdf,text/*"/>
+      <div class="file-picked" id="add-cand-filename">No file chosen.</div>
+    </div>
+    <div class="err" id="add-cand-err"></div>
+    <p class="modal-note">JSON files are used as-is. PDFs and text files are parsed by the LLM (requires a Groq key on the server).</p>
+    <div class="modal-footer">
+      <button class="ghost" id="add-cand-cancel">Cancel</button>
+      <button class="primary" id="add-cand-save">Add to roster</button>
+    </div>
+  </div>
+</div>
+
 <!-- PAGE 3: ROSTER -->
 <div id="pg-roster" class="page hidden">
   <div class="roster-inner">
     <h1>Choose your candidate</h1>
     <p class="roster-lede dim">Select a candidate from the 31-day AI cohort to begin the interview.</p>
     <div id="roster-mode-badge"></div>
-    <input class="filter" id="roster-filter" placeholder="Filter by name or role…"/>
+    <div class="roster-tools">
+      <input class="filter" id="roster-filter" placeholder="Filter by name or role…"/>
+      <button class="btn-add-cand" id="btn-add-cand" title="Add a custom candidate profile">+ Add candidate</button>
+    </div>
     <div id="roster-list"></div>
   </div>
 </div>
@@ -1307,6 +1339,50 @@ document.getElementById('modal-voice').onclick=e=>{ if(e.target.id==='modal-voic
 
 // Roster filter
 document.getElementById('roster-filter').oninput=paintRoster;
+
+// Add-candidate modal
+document.getElementById('btn-add-cand').onclick=()=>{
+  document.getElementById('add-cand-err').textContent='';
+  document.getElementById('add-cand-file').value='';
+  document.getElementById('add-cand-filename').textContent='No file chosen.';
+  openModal('modal-add-cand');
+};
+document.getElementById('add-cand-cancel').onclick=()=>closeModal('modal-add-cand');
+document.getElementById('modal-add-cand').onclick=e=>{ if(e.target.id==='modal-add-cand') closeModal('modal-add-cand'); };
+document.getElementById('add-cand-file').onchange=e=>{
+  const f=e.target.files[0];
+  document.getElementById('add-cand-filename').textContent=f?f.name+' ('+f.size+' bytes)':'No file chosen.';
+  document.getElementById('add-cand-err').textContent='';
+};
+document.getElementById('add-cand-save').onclick=async()=>{
+  const err=document.getElementById('add-cand-err');
+  const btn=document.getElementById('add-cand-save');
+  const f=document.getElementById('add-cand-file').files[0];
+  if(!f){ err.textContent='Choose a file first.'; return; }
+  err.textContent=''; btn.disabled=true; const prev=btn.textContent; btn.textContent='Parsing…';
+  try{
+    const form=new FormData(); form.append('file', f);
+    const r=await fetch('/api/candidate-from-file',{method:'POST', body:form});
+    const j=await r.json();
+    if(!r.ok){ err.textContent=j.error||('HTTP '+r.status); return; }
+    const obj=j.candidate; const m=obj.member||{};
+    if(!m.id||!m.name){ err.textContent='Parsed profile missing member.id or member.name.'; return; }
+    const s=obj.signals||{};
+    const entry={
+      id:m.id, name:m.name,
+      jobRole:m.jobRole||'—', yearsExperience:m.yearsExperience||0,
+      missionsCompleted:s.missionsCompleted||0,
+      missionsFirstTry:s.missionsFirstTry||0,
+      commitDays:s.commitDays||0,
+      candidate:{member:m,missions:obj.missions||[],signals:s},
+      custom:true,
+    };
+    S.roster=[entry,...(S.roster||[])];
+    closeModal('modal-add-cand');
+    paintRoster();
+  }catch(e){ err.textContent='Upload failed: '+e.message; }
+  finally{ btn.disabled=false; btn.textContent=prev; }
+};
 
 // Mode badge in roster
 function updateRosterBadge(){
