@@ -68,6 +68,7 @@ input:focus,textarea:focus{border-color:var(--accent)}
 .field label{display:block;font-size:12px;color:var(--dim);margin-bottom:6px;font-weight:500;letter-spacing:.03em;text-transform:uppercase}
 .field-link{font-size:11.5px;color:var(--accent);text-decoration:none;margin-top:5px;display:inline-block}
 .field-link:hover{text-decoration:underline}
+.field select{width:100%;background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:10px 12px;color:var(--text);font:inherit;cursor:pointer}
 .modal-sep{border:none;border-top:1px solid var(--line);margin:18px 0}
 .modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
 .modal-note{font-size:11.5px;color:var(--dimmer);margin-top:10px}
@@ -274,6 +275,13 @@ h3{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:var(--dimm
     <h2>Voice Interview Setup</h2>
     <p class="sub">Connect your LLM provider and LiveKit voice room.</p>
     <div class="field">
+      <label>Microphone device</label>
+      <select id="voice-mic-device">
+        <option value="">Default device</option>
+      </select>
+      <div class="field-link" style="font-size:11px;color:var(--dim);margin-top:6px">Chrome may default to the wrong mic. Pick your wired headset or USB device here.</div>
+    </div>
+    <div class="field">
       <label>Groq API Key (LLM)</label>
       <input type="password" id="voice-groq-key" placeholder="gsk_…" autocomplete="off"/>
       <a class="field-link" href="https://console.groq.com/keys" target="_blank">↗ Get a free key at console.groq.com</a>
@@ -359,7 +367,7 @@ const MODULES = [[1,3],[4,6],[7,10],[11,15],[16,20],[21,24],[25,28],[29,31]];
 const S = {
   page: 'welcome',      // welcome | mode | roster | interview
   mode: null,           // chat | voice
-  keys: { groq:'', livekitUrl:'', livekitApiKey:'', livekitApiSecret:'' },
+  keys: { groq:'', livekitUrl:'', livekitApiKey:'', livekitApiSecret:'', micDeviceId:'' },
 
   // interview
   sessionId: null, candidate: null, messages: [], insight: null,
@@ -827,13 +835,17 @@ function loadScript(src){
 // silent interview.
 async function setupMic(){
   if(micStream) return; // already open
-  micStream = await navigator.mediaDevices.getUserMedia({
-    audio:{
-      echoCancellation:true,
-      noiseSuppression:true,
-      autoGainControl:true,  // browser-level AGC helps low voices
-    }
-  });
+  const audioConstraints={
+    echoCancellation:true,
+    noiseSuppression:true,
+    autoGainControl:true,  // browser-level AGC helps low voices
+  };
+  // Chrome's per-site default mic can silently differ from the OS default
+  // (e.g. it picks a paired Bluetooth headset over a wired USB mic even
+  // though Windows shows the wired one as default) — force the device the
+  // candidate explicitly chose in the voice setup modal, if any.
+  if(S.keys.micDeviceId) audioConstraints.deviceId={exact:S.keys.micDeviceId};
+  micStream = await navigator.mediaDevices.getUserMedia({audio:audioConstraints});
   const track = micStream.getAudioTracks()[0];
   if(track){
     console.info('mic:', track.label, 'muted:', track.muted, track.getSettings());
@@ -1310,7 +1322,30 @@ document.getElementById('choose-chat').onclick=()=>{
 document.getElementById('choose-voice').onclick=()=>{
   S.mode='voice';
   openModal('modal-voice');
+  populateMicDevices();
 };
+
+// ── Microphone device picker ──
+// Chrome keeps its own default mic per-site, which is not always the OS
+// default (e.g. it may pick a Bluetooth headset over a wired USB mic even
+// though Windows shows the wired one as default). This lets the candidate
+// force the right device instead of guessing why the mic reads silence.
+async function populateMicDevices(){
+  const sel=document.getElementById('voice-mic-device');
+  if(!sel) return;
+  try{
+    // Need a permission grant before device labels are populated.
+    try{
+      const tmp=await navigator.mediaDevices.getUserMedia({audio:true});
+      tmp.getTracks().forEach(t=>t.stop());
+    }catch(e){ /* user can still pick blind if permission denied here */ }
+    const devices=await navigator.mediaDevices.enumerateDevices();
+    const mics=devices.filter(d=>d.kind==='audioinput');
+    sel.innerHTML='<option value="">Default device</option>'+
+      mics.map(d=>`<option value="${esc(d.deviceId)}">${esc(d.label||'Microphone ('+d.deviceId.slice(0,8)+')')}</option>`).join('');
+    if(S.keys.micDeviceId) sel.value=S.keys.micDeviceId;
+  }catch(e){ console.warn('could not list mic devices:', e.message); }
+}
 
 // Chat modal
 document.getElementById('chat-modal-cancel').onclick=()=>closeModal('modal-chat');
@@ -1331,6 +1366,7 @@ document.getElementById('voice-modal-start').onclick=()=>{
   S.keys.livekitUrl=document.getElementById('voice-lk-url').value.trim();
   S.keys.livekitApiKey=document.getElementById('voice-lk-apikey').value.trim();
   S.keys.livekitApiSecret=document.getElementById('voice-lk-secret').value.trim();
+  S.keys.micDeviceId=document.getElementById('voice-mic-device').value.trim();
   closeModal('modal-voice');
   gotoPage('roster');
   paintRoster();
