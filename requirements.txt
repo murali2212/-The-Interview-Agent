@@ -6,10 +6,11 @@ python-dotenv
 python-multipart
 pypdf
 
-# LangChain + provider
-langchain
+# LangChain + provider — langchain-core and langchain-groq only; the bare
+# `langchain` and `langchain-community` packages are never imported anywhere
+# in app/ and just add deploy weight (langchain-community especially pulls
+# in a long transitive chain).
 langchain-core
-langchain-community
 langchain-groq
 
 # Tests
