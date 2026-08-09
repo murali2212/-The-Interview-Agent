@@ -103,20 +103,16 @@ MAX_REPLY_SENTENCES = int(os.getenv("MAX_REPLY_SENTENCES", "4"))
 SEED = int(os.getenv("SEED", "1337"))
 
 # ---------------------------------------------------------------------------
-# Voice (phase two — read here so nothing needs restructuring later)
+# Voice — LiveKit transport only (STT via Groq Whisper, TTS via browser)
 # ---------------------------------------------------------------------------
 
-DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "").strip()
-CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY", "").strip()
 LIVEKIT_URL = os.getenv("LIVEKIT_URL", "").strip()
 LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "").strip()
 LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "").strip()
 
 
 def voice_available() -> bool:
-    return all(
-        [DEEPGRAM_API_KEY, CARTESIA_API_KEY, LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET]
-    )
+    return all([LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET])
 
 
 def describe() -> dict[str, object]:
